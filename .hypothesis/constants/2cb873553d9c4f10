@@ -1,0 +1,4 @@
+# file: /Users/johneakin/PyCharmProjects/facebook-messenger-scrape-bot/src/db/repository.py
+# hypothesis_version: 6.151.2
+
+['*', 'bot_configurations', 'bot_id', 'confidence', 'content', 'content_hash', 'created_at', 'id', 'is_active', 'message_history', 'message_text', 'page_id', 'reference_doc_id', 'reference_documents', 'requires_escalation', 'response_text', 'sender_id', 'source_url', 'tone', 'updated_at', 'website_url']

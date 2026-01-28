@@ -1,0 +1,4 @@
+# file: /Users/johneakin/PyCharmProjects/facebook-messenger-scrape-bot/src/api/health.py
+# hypothesis_version: 6.151.2
+
+['/health', 'ok', 'status']
