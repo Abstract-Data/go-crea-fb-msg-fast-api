@@ -1,5 +1,9 @@
 """PydanticAI agent service."""
 
+import time
+
+import logfire
+
 from src.models.agent_models import AgentContext, AgentResponse
 from src.services.copilot_service import CopilotService
 
@@ -31,6 +35,16 @@ class MessengerAgentService:
         Returns:
             AgentResponse with message and confidence
         """
+        start_time = time.time()
+        
+        logfire.info(
+            "Processing agent response",
+            user_message_length=len(user_message),
+            tone=context.tone,
+            reference_doc_length=len(context.reference_doc),
+            recent_messages_count=len(context.recent_messages),
+        )
+        
         # Build system prompt
         system_prompt = f"""You are a {context.tone} assistant for a political/business Facebook page.
 Use ONLY the following reference document as your source of truth:
@@ -64,6 +78,17 @@ If the user asks about something not covered, say you don't know and suggest a h
         if "don't know" in response_text.lower() or "human" in response_text.lower():
             requires_escalation = True
             escalation_reason = "Question outside knowledge base"
+        
+        elapsed = time.time() - start_time
+        
+        logfire.info(
+            "Agent response generated",
+            response_length=len(response_text),
+            confidence=confidence,
+            requires_escalation=requires_escalation,
+            escalation_reason=escalation_reason,
+            response_time_ms=elapsed * 1000,
+        )
         
         return AgentResponse(
             message=response_text,

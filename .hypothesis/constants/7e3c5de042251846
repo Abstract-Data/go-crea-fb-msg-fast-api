@@ -1,4 +1,0 @@
-# file: /Users/johneakin/PyCharmProjects/facebook-messenger-scrape-bot/src/api/webhook.py
-# hypothesis_version: 6.151.2
-
-[403, 'hub.challenge', 'hub.mode', 'hub.verify_token', 'ok', 'status', 'subscribe']

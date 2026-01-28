@@ -147,3 +147,12 @@ uv run pytest
 uv run ruff format .
 uv run ruff check .
 ```
+
+### Troubleshooting
+
+For operational issues, debugging procedures, and common error solutions, see `RUNBOOK.md`. It contains:
+- Common issues and fixes
+- Debug commands for diagnosing problems
+- Alert thresholds and monitoring guidance
+- Service-specific troubleshooting
+- Quick reference for environment variables and error messages

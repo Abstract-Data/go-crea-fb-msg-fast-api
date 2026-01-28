@@ -1,11 +1,12 @@
 """Shared pytest fixtures and configuration."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from datetime import datetime
 from typing import Any
 from fastapi.testclient import TestClient
 import respx
+import logfire
 
 from src.services.copilot_service import CopilotService
 from src.models.agent_models import AgentContext, AgentResponse
@@ -199,8 +200,67 @@ def mock_settings(monkeypatch):
         copilot_cli_host="http://localhost:5909",
         copilot_enabled=True,
         openai_api_key="test-openai-key",
-        env="local"
+        env="local",
+        logfire_token=None,
+        log_level="INFO",
+        logfire_enable_pii_masking=True,
+        logfire_enable_request_logging=True,
     )
     
     monkeypatch.setattr("src.config.get_settings", lambda: settings)
     return settings
+
+
+@pytest.fixture
+def logfire_capture():
+    """
+    Capture Logfire logs for testing.
+    
+    This fixture patches Logfire to capture log calls for assertion.
+    """
+    captured_logs = []
+    
+    original_info = logfire.info
+    original_warn = logfire.warn
+    original_error = logfire.error
+    
+    def capture_info(*args, **kwargs):
+        captured_logs.append(("info", args, kwargs))
+        return original_info(*args, **kwargs)
+    
+    def capture_warn(*args, **kwargs):
+        captured_logs.append(("warn", args, kwargs))
+        return original_warn(*args, **kwargs)
+    
+    def capture_error(*args, **kwargs):
+        captured_logs.append(("error", args, kwargs))
+        return original_error(*args, **kwargs)
+    
+    with patch("logfire.info", side_effect=capture_info), \
+         patch("logfire.warn", side_effect=capture_warn), \
+         patch("logfire.error", side_effect=capture_error):
+        yield captured_logs
+
+
+@pytest.fixture
+def mock_logfire(monkeypatch):
+    """
+    Mock Logfire for testing without actual logging.
+    
+    Useful for tests that don't need to verify logging behavior.
+    """
+    mock_logfire_module = MagicMock()
+    mock_logfire_module.info = Mock()
+    mock_logfire_module.warn = Mock()
+    mock_logfire_module.error = Mock()
+    mock_logfire_module.context = MagicMock()
+    mock_logfire_module.context.__enter__ = Mock(return_value={})
+    mock_logfire_module.context.__exit__ = Mock(return_value=None)
+    
+    monkeypatch.setattr("src.services.copilot_service.logfire", mock_logfire_module)
+    monkeypatch.setattr("src.services.agent_service.logfire", mock_logfire_module)
+    monkeypatch.setattr("src.services.scraper.logfire", mock_logfire_module)
+    monkeypatch.setattr("src.services.facebook_service.logfire", mock_logfire_module)
+    monkeypatch.setattr("src.db.repository.logfire", mock_logfire_module)
+    
+    return mock_logfire_module

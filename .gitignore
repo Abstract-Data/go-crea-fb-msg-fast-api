@@ -8,7 +8,7 @@ __pycache__/
 build/
 dist/
 wheels/
-*.egg-info
+*.egg-info/
 .eggs/
 
 # Virtual environments
@@ -22,33 +22,65 @@ env/
 .env.local
 .env.*.local
 
-# IDE
+# IDE and Editor files
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
 *~
+.project
+.pydevproject
+.settings/
 
-# Testing
+# Testing artifacts
 .pytest_cache/
 .coverage
+coverage.xml
 htmlcov/
 .tox/
+.hypothesis/
+test-results/
+.pytest/
+junit.xml
+*.cover
 
 # Type checking
 .mypy_cache/
 .dmypy.json
 dmypy.json
+.pytype/
 
-# OS
-.DS_Store
-Thumbs.db
+# Linting and formatting
+.ruff_cache/
+.bandit
+.flake8
 
 # Logs
 *.log
 logs/
+*.log.*
 
-# Database
+# Database files
 *.db
 *.sqlite
 *.sqlite3
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Project-specific
+# Note: .python-version is kept for uv/python version management
+# Remove this line if you want to ignore it

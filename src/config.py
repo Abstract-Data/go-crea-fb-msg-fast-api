@@ -71,6 +71,24 @@ class Settings(BaseSettings):
         default=1.0,
         description="Sentry traces sample rate (0.0 to 1.0)"
     )
+    
+    # Logfire Configuration
+    logfire_token: str | None = Field(
+        default=None,
+        description="Logfire authentication token (optional, for cloud logging)"
+    )
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
+        default="INFO",
+        description="Logging level"
+    )
+    logfire_enable_pii_masking: bool = Field(
+        default=True,
+        description="Enable PII masking in logs"
+    )
+    logfire_enable_request_logging: bool = Field(
+        default=True,
+        description="Enable HTTP request/response logging"
+    )
 
 
 @lru_cache()

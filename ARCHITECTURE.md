@@ -21,6 +21,7 @@ Facebook Messenger → Webhook → FastAPI → Agent Service → Copilot SDK →
 - **Reference Document Service**: Content synthesis
 - **Supabase Database**: Configuration and message history storage
 - **Facebook Service**: Message sending via Graph API
+- **Logfire Observability**: Structured logging, request tracing, and performance monitoring
 
 ---
 
@@ -179,6 +180,15 @@ class AgentResponse(BaseModel):
 - Message history logging
 - Connection: Via Supabase Python client
 
+**Pydantic Logfire:**
+- Structured logging and observability
+- FastAPI request/response tracing
+- Pydantic model validation logging
+- PydanticAI agent execution tracing
+- Correlation ID tracking across services
+- Environment-aware configuration (local console vs production JSON)
+- Optional cloud logging with Logfire token
+
 ---
 
 ## Error Recovery & Fallback Logic
@@ -260,43 +270,55 @@ async def chat(self, system_prompt: str, messages: list[dict]) -> str:
 ┌─────────────────┐
 │ FastAPI         │
 │ Webhook Handler │
+│ + Logfire       │ ← Request tracing starts
 └────────┬────────┘
          │
-         ├─→ Parse payload
+         ├─→ Parse payload (Pydantic validation logged)
          ├─→ Extract page_id
+         ├─→ Correlation ID generated
          │
          ↓
 ┌─────────────────┐
 │ Repository      │
 │ (Supabase)      │
+│ + Logfire       │ ← DB query timing logged
 └────────┬────────┘
          │
-         ├─→ Get bot_config
-         ├─→ Get reference_doc
-         ├─→ Get recent messages
+         ├─→ Get bot_config (timed)
+         ├─→ Get reference_doc (timed)
+         ├─→ Get recent messages (timed)
          │
          ↓
 ┌─────────────────┐
 │ Agent Service   │
 │ (PydanticAI)    │
+│ + Logfire       │ ← Agent execution traced
 └────────┬────────┘
          │
-         ├─→ Build context
-         ├─→ Call Copilot SDK
-         ├─→ Generate response
+         ├─→ Build context (logged)
+         ├─→ Call Copilot SDK (timed, fallback logged)
+         ├─→ Generate response (confidence logged)
          │
          ↓
 ┌─────────────────┐
 │ Facebook        │
 │ Service         │
+│ + Logfire       │ ← API call timing logged
 └────────┬────────┘
          │
-         ├─→ Send message
+         ├─→ Send message (success/failure logged)
          │
          ↓
 ┌─────────────────┐
 │ Repository      │
 │ (Save history)  │
+│ + Logfire       │ ← Write operation timed
+└─────────────────┘
+         │
+         ↓
+┌─────────────────┐
+│ Logfire         │
+│ (Observability) │ ← Complete trace with correlation ID
 └─────────────────┘
 ```
 
@@ -368,3 +390,51 @@ async def chat(self, system_prompt: str, messages: list[dict]) -> str:
 - URL validation for website scraping
 - Message length limits
 - Rate limiting per user
+
+---
+
+## Observability Architecture
+
+### Logging & Tracing
+
+**Pydantic Logfire Integration:**
+- **Centralized Configuration**: `src/logging_config.py` handles environment-aware setup
+- **FastAPI Instrumentation**: Automatic request/response tracing with timing
+- **Pydantic Instrumentation**: Model validation logging for all Pydantic models
+- **PydanticAI Instrumentation**: Agent execution tracing and decision logging
+- **Correlation IDs**: Request tracing across services via `CorrelationIDMiddleware`
+- **Structured Logging**: JSON logs in production, formatted console logs in local development
+
+**Service-Level Logging:**
+- **CopilotService**: Health check timing, API call success/failure, fallback events
+- **MessengerAgentService**: Message processing timing, confidence scores, escalation decisions
+- **ScraperService**: Website scraping attempts, chunking statistics, HTTP errors
+- **FacebookService**: Message send attempts, API responses, rate limiting
+- **Repository**: Database operation timing, query success/failure rates
+
+**Log Configuration:**
+- Environment-based log levels (DEBUG/INFO/WARNING/ERROR)
+- PII masking utilities for sensitive data
+- Token redaction for authentication tokens
+- Optional cloud logging with Logfire token
+
+**Error Tracking:**
+- Sentry integration for error aggregation and alerting
+- Logfire structured logs for debugging
+- Correlation between Sentry errors and Logfire traces
+
+### Performance Monitoring
+
+**Metrics Tracked:**
+- Request/response latency (p50, p95, p99)
+- Agent response generation time
+- Database query duration
+- External API call timing (Copilot SDK, Facebook Graph API)
+- Service availability (Copilot SDK health checks)
+
+**Alert Thresholds:**
+- Response latency > 2 seconds (p95)
+- Error rate > 2% for 5 minutes
+- Escalation rate > 20%
+- Copilot SDK availability < 99%
+- See `RUNBOOK.md` for detailed alert thresholds

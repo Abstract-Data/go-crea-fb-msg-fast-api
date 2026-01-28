@@ -41,7 +41,13 @@ messenger_bot/
 ├── pyproject.toml             # Project configuration
 ├── .env.example              # Environment variables template
 ├── railway.toml              # Railway deployment config
-└── README.md                  # Project documentation
+├── README.md                  # Project documentation
+├── RUNBOOK.md                 # Operational troubleshooting guide
+├── ARCHITECTURE.md            # System architecture and design
+├── AGENTS.md                  # AI agent guidelines
+├── TESTING.md                 # Testing strategies
+├── PROJECT_STRUCTURE.md       # This file
+└── GUARDRAILS.md             # Safety boundaries and validation rules
 ```
 
 ## File Descriptions
@@ -51,7 +57,12 @@ messenger_bot/
 - **pyproject.toml**: Python project configuration, dependencies, and build system
 - **.env.example**: Template for environment variables
 - **railway.toml**: Railway deployment configuration
-- **README.md**: Project documentation
+- **README.md**: Project documentation and quick start guide
+- **RUNBOOK.md**: Operational troubleshooting guide with common issues, fixes, debug commands, and alert thresholds
+- **ARCHITECTURE.md**: System architecture, component interactions, and design decisions
+- **AGENTS.md**: Guidelines for AI agents, code standards, testing practices, and operational maintenance
+- **TESTING.md**: Testing strategies including property-based testing, stateful testing, and evaluation sets
+- **GUARDRAILS.md**: Safety boundaries, validation rules, and risk mitigation strategies
 - **PROJECT_STRUCTURE.md**: This file
 
 ### src/ Directory

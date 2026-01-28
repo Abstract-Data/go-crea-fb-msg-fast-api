@@ -1,4 +1,0 @@
-# file: /Users/johneakin/PyCharmProjects/facebook-messenger-scrape-bot/src/main.py
-# hypothesis_version: 6.151.2
-
-[8000, '*', '/', '/webhook', '0.0.0.0', '0.1.0', 'ENV', 'PORT', '__main__', 'health', 'local', 'message', 'src.main:app', 'webhook']

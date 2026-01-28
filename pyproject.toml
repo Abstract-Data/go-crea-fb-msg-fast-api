@@ -16,6 +16,7 @@ dependencies = [
     "typer>=0.9.0",
     "python-dotenv>=1.0.0",
     "sentry-sdk[fastapi,pydantic-ai]>=2.50.0",
+    "logfire[fastapi,pydantic]>=1.0.0",
 ]
 
 [project.optional-dependencies]
