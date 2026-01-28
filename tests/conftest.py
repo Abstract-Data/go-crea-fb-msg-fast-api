@@ -1,5 +1,6 @@
 """Shared pytest fixtures and configuration."""
 
+import os
 import pytest
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from datetime import datetime
@@ -17,6 +18,26 @@ except ImportError:
 
 from src.models.agent_models import AgentContext, AgentResponse
 from src.models.config_models import BotConfiguration
+
+# Configure logfire for tests if available
+if logfire is not None:
+    # Set ignore_no_config to suppress warnings when logfire isn't fully configured
+    # This allows tests to run without requiring full logfire setup
+    os.environ.setdefault("LOGFIRE_IGNORE_NO_CONFIG", "1")
+    
+    # Try to configure logfire if token is available
+    try:
+        from src.config import get_settings
+        settings = get_settings()
+        if hasattr(settings, "logfire_token") and settings.logfire_token:
+            logfire.configure(
+                project_name="facebook-messenger-scrape-bot",
+                environment="test",
+                token=settings.logfire_token,
+            )
+    except Exception:
+        # If configuration fails, ignore_no_config will suppress warnings
+        pass
 
 
 @pytest.fixture
@@ -63,9 +84,12 @@ def mock_supabase_client():
     update_mock = MagicMock()
     execute_mock = MagicMock()
     
-    # Chain: table().select().eq().execute()
+    # Chain: table().select().eq().eq().execute() (handles multiple eq calls)
     execute_mock.data = []
+    eq_mock2 = MagicMock()
+    eq_mock2.execute.return_value = execute_mock
     eq_mock.execute.return_value = execute_mock
+    eq_mock.eq.return_value = eq_mock2  # Support chained eq() calls
     select_mock.eq.return_value = eq_mock
     table_mock.select.return_value = select_mock
     
@@ -183,7 +207,7 @@ def sample_agent_response():
 
 
 @pytest.fixture
-def test_client():
+def test_client(mock_settings, mock_logfire):
     """FastAPI TestClient for E2E tests."""
     from fastapi.testclient import TestClient
     from src.main import app
@@ -222,6 +246,8 @@ def mock_settings(monkeypatch):
     )
     
     monkeypatch.setattr("src.config.get_settings", lambda: settings)
+    # Patch where get_settings is used so request handlers see the mock
+    monkeypatch.setattr("src.main.get_settings", lambda: settings)
     return settings
 
 
@@ -265,18 +291,41 @@ def mock_logfire(monkeypatch):
     Mock Logfire for testing without actual logging.
     
     Useful for tests that don't need to verify logging behavior.
+    Auto-applied to all tests to prevent logfire.context errors.
     """
+    from contextlib import contextmanager
+    import sys
+    
+    @contextmanager
+    def mock_span(*args, **kwargs):
+        yield {}
+    
     mock_logfire_module = MagicMock()
     mock_logfire_module.info = Mock()
     mock_logfire_module.warn = Mock()
     mock_logfire_module.error = Mock()
-    mock_logfire_module.context = MagicMock()
-    mock_logfire_module.context.__enter__ = Mock(return_value={})
-    mock_logfire_module.context.__exit__ = Mock(return_value=None)
+    mock_logfire_module.span = mock_span
+    mock_logfire_module.context = mock_span  # For backwards compatibility if used
+    mock_logfire_module.configure = Mock()
+    mock_logfire_module.instrument_fastapi = Mock()
+    mock_logfire_module.instrument_pydantic = Mock()
+    mock_logfire_module.instrument_pydantic_ai = Mock()
     
-    monkeypatch.setattr("src.services.agent_service.logfire", mock_logfire_module)
+    # Patch logfire in sys.modules to affect all imports (only patch attributes that exist)
+    if 'logfire' in sys.modules:
+        original_logfire = sys.modules['logfire']
+        for attr in ['info', 'warn', 'error', 'span', 'configure',
+                     'instrument_fastapi', 'instrument_pydantic', 'instrument_pydantic_ai']:
+            if hasattr(original_logfire, attr):
+                monkeypatch.setattr(original_logfire, attr, getattr(mock_logfire_module, attr))
+        if hasattr(original_logfire, 'context'):
+            monkeypatch.setattr(original_logfire, 'context', mock_logfire_module.context)
+    
+    # Also patch module-level imports in our code (only modules that use logfire)
     monkeypatch.setattr("src.services.scraper.logfire", mock_logfire_module)
     monkeypatch.setattr("src.services.facebook_service.logfire", mock_logfire_module)
     monkeypatch.setattr("src.db.repository.logfire", mock_logfire_module)
+    monkeypatch.setattr("src.middleware.correlation_id.logfire", mock_logfire_module)
+    monkeypatch.setattr("src.logging_config.logfire", mock_logfire_module)
     
     return mock_logfire_module

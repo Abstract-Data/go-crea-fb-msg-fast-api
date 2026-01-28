@@ -24,7 +24,8 @@ class TestWebhookMessageFlow:
             facebook_page_access_token="test-token",
             facebook_verify_token="test-verify",
             supabase_url="https://test.supabase.co",
-            supabase_service_key="test-key"
+            supabase_service_key="test-key",
+            pydantic_ai_gateway_api_key="paig_test_key"
         )
         mock_get_settings.return_value = mock_settings
         
@@ -63,7 +64,8 @@ class TestWebhookMessageFlow:
             facebook_page_access_token="test-token",
             facebook_verify_token="test-verify",
             supabase_url="https://test.supabase.co",
-            supabase_service_key="test-key"
+            supabase_service_key="test-key",
+            pydantic_ai_gateway_api_key="paig_test_key"
         )
         mock_get_settings.return_value = mock_settings
         
@@ -94,7 +96,8 @@ class TestWebhookMessageFlow:
             facebook_page_access_token="test-token",
             facebook_verify_token="test-verify",
             supabase_url="https://test.supabase.co",
-            supabase_service_key="test-key"
+            supabase_service_key="test-key",
+            pydantic_ai_gateway_api_key="paig_test_key"
         )
         mock_get_settings.return_value = mock_settings
         
@@ -122,7 +125,8 @@ class TestWebhookMessageFlow:
             facebook_page_access_token="test-token",
             facebook_verify_token="test-verify",
             supabase_url="https://test.supabase.co",
-            supabase_service_key="test-key"
+            supabase_service_key="test-key",
+            pydantic_ai_gateway_api_key="paig_test_key"
         )
         mock_get_settings.return_value = mock_settings
         

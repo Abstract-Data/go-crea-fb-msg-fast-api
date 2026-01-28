@@ -36,7 +36,8 @@ class TestSendMessage:
         
         # Verify payload
         import json
-        payload = json.loads(request.read())
+        # respx captures request body in request.content as bytes
+        payload = json.loads(request.content.decode('utf-8'))
         assert payload["recipient"]["id"] == "user-123"
         assert payload["message"]["text"] == "Hello, this is a test message"
     
@@ -45,7 +46,7 @@ class TestSendMessage:
     async def test_send_message_request_format(self):
         """Test that request format matches Facebook Graph API requirements."""
         respx.post("https://graph.facebook.com/v18.0/me/messages").mock(
-            return_value=httpx.Response(200)
+            return_value=httpx.Response(200, json={"message_id": "msg-123"})
         )
         
         await send_message(
@@ -56,7 +57,7 @@ class TestSendMessage:
         
         request = respx.calls.last.request
         import json
-        payload = json.loads(request.read())
+        payload = json.loads(request.content.decode('utf-8'))
         
         # Verify structure
         assert "recipient" in payload
@@ -141,7 +142,7 @@ class TestSendMessage:
     ):
         """Property: send_message() should handle various inputs."""
         respx.post("https://graph.facebook.com/v18.0/me/messages").mock(
-            return_value=httpx.Response(200)
+            return_value=httpx.Response(200, json={"message_id": "msg-123"})
         )
         
         # Should not raise exception for valid inputs
@@ -155,7 +156,7 @@ class TestSendMessage:
         assert len(respx.calls) == 1
         request = respx.calls.last.request
         import json
-        payload = json.loads(request.read())
+        payload = json.loads(request.content.decode('utf-8'))
         assert payload["recipient"]["id"] == recipient_id
         assert payload["message"]["text"] == text
     
@@ -164,7 +165,7 @@ class TestSendMessage:
     async def test_send_message_access_token_in_params(self):
         """Test that access token is passed as query parameter."""
         respx.post("https://graph.facebook.com/v18.0/me/messages").mock(
-            return_value=httpx.Response(200)
+            return_value=httpx.Response(200, json={"message_id": "msg-123"})
         )
         
         await send_message(
@@ -185,7 +186,7 @@ class TestSendMessage:
         long_text = "A" * 5000  # Very long message
         
         respx.post("https://graph.facebook.com/v18.0/me/messages").mock(
-            return_value=httpx.Response(200)
+            return_value=httpx.Response(200, json={"message_id": "msg-123"})
         )
         
         # Should handle long messages (Facebook may truncate, but function should work)
@@ -197,5 +198,5 @@ class TestSendMessage:
         
         request = respx.calls.last.request
         import json
-        payload = json.loads(request.read())
+        payload = json.loads(request.content.decode('utf-8'))
         assert len(payload["message"]["text"]) == 5000

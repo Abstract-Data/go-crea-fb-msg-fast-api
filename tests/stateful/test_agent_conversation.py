@@ -1,7 +1,7 @@
 """Stateful tests for agent conversation flows using Hypothesis."""
 
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import patch
 
 from src.services.agent_service import MessengerAgentService
 from src.models.agent_models import AgentContext, AgentResponse
@@ -11,14 +11,26 @@ class TestAgentConversationStateful:
     """Test agent conversation state management."""
     
     @pytest.mark.asyncio
-    async def test_conversation_flow_basic(self):
+    @patch('src.services.agent_service.get_settings')
+    async def test_conversation_flow_basic(self, mock_get_settings, monkeypatch):
         """Basic test of conversation flow."""
-        # Create mock Copilot service
-        copilot = AsyncMock()
-        copilot.chat = AsyncMock(return_value="Test response")
+        from src.config import Settings
         
-        # Create agent service
-        agent = MessengerAgentService(copilot)
+        # Set environment variable for PydanticAI Gateway
+        monkeypatch.setenv("PYDANTIC_AI_GATEWAY_API_KEY", "paig_test_key")
+        
+        # Mock settings for agent initialization
+        mock_settings = Settings(
+            facebook_page_access_token="test-token",
+            facebook_verify_token="test-verify",
+            supabase_url="https://test.supabase.co",
+            supabase_service_key="test-key",
+            pydantic_ai_gateway_api_key="paig_test_key"
+        )
+        mock_get_settings.return_value = mock_settings
+        
+        # Create agent service (no longer takes copilot parameter)
+        agent = MessengerAgentService()
         
         # Initialize conversation state
         context = AgentContext(
@@ -65,12 +77,25 @@ class TestAgentConversationStateful:
             assert len(entry["user"]) > 0
     
     @pytest.mark.asyncio
-    async def test_conversation_maintains_context(self):
+    @patch('src.services.agent_service.get_settings')
+    async def test_conversation_maintains_context(self, mock_get_settings, monkeypatch):
         """Test that conversation maintains context correctly."""
-        copilot = AsyncMock()
-        copilot.chat = AsyncMock(return_value="Response with context")
+        from src.config import Settings
         
-        agent = MessengerAgentService(copilot)
+        # Set environment variable for PydanticAI Gateway
+        monkeypatch.setenv("PYDANTIC_AI_GATEWAY_API_KEY", "paig_test_key")
+        
+        # Mock settings for agent initialization
+        mock_settings = Settings(
+            facebook_page_access_token="test-token",
+            facebook_verify_token="test-verify",
+            supabase_url="https://test.supabase.co",
+            supabase_service_key="test-key",
+            pydantic_ai_gateway_api_key="paig_test_key"
+        )
+        mock_get_settings.return_value = mock_settings
+        
+        agent = MessengerAgentService()
         
         context = AgentContext(
             bot_config_id="test-123",

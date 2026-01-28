@@ -12,8 +12,12 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "httpx>=0.25.0",
     "beautifulsoup4>=4.12.0",
+    "setuptools>=65.0.0",
+    "undetected-chromedriver>=3.5.0",
     "supabase>=2.0.0",
+    "psycopg[binary]>=3.1.0",
     "typer>=0.9.0",
+    "questionary>=2.0.0",
     "python-dotenv>=1.0.0",
     "sentry-sdk[fastapi,pydantic-ai]>=2.50.0",
     "logfire[fastapi,pydantic]>=1.0.0",
@@ -60,6 +64,8 @@ addopts = [
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning",
+    "ignore::logfire._internal.config.LogfireNotConfiguredWarning",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
 ]
 
 [tool.coverage.run]

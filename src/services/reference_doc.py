@@ -17,6 +17,10 @@ class ReferenceDocument(BaseModel):
     key_topics: list[str] = Field(..., description="Main topics covered")
     common_questions: list[str] = Field(..., description="Anticipated FAQs")
     important_details: str = Field(..., description="Critical information to remember")
+    detailed_content: str = Field(
+        "",
+        description="Comprehensive section with specific names, endorsers, policies, quotes, contact details. Include as much specific detail as the source provides—do not summarize into vague bullet points.",
+    )
     contact_info: str | None = Field(None, description="Contact information if available")
 
 
@@ -39,29 +43,32 @@ async def build_reference_document(
     # Create synthesis agent
     agent = Agent(
         settings.default_model,
-        result_type=ReferenceDocument,
-        system_prompt="""You are a content synthesis assistant. 
+        output_type=ReferenceDocument,
+        system_prompt="""You are a content synthesis assistant.
 Your job is to create comprehensive reference documents for AI agents that will answer questions about websites.
-Focus on extracting: policies, services, FAQs, contact information, and key positions/statements.
-Be thorough but concise.""",
+Include specific details: names, policies, endorsements, quotes, dates, and concrete facts from the content.
+Do not summarize into vague bullet points—preserve enough detail so the agent can answer "Who endorses X?", "What is their position on Y?", and similar questions accurately.
+Focus on: policies, services, FAQs, contact information, key positions, and any lists (endorsements, team, issues).""",
     )
-    
-    # Build prompt with all chunks
+
+    # Build prompt with all chunks (content from multiple pages)
     chunks_text = "\n\n---\n\n".join(
-        f"CHUNK {i+1}:\n{chunk}" 
+        f"CHUNK {i+1}:\n{chunk}"
         for i, chunk in enumerate(text_chunks)
     )
-    
-    prompt = f"""Analyze the following content from {website_url} and create a structured reference document.
 
-WEBSITE CONTENT:
+    prompt = f"""Analyze the following content from {website_url} (may include multiple pages). Create a structured reference document.
+
+WEBSITE CONTENT (all crawled pages):
 {chunks_text}
 
-Create a comprehensive reference document that an AI agent can use to answer questions about this website."""
+Create a comprehensive reference document that an AI agent can use to answer detailed questions.
+- In overview, key_topics, important_details: be specific (names, policies, endorsements, facts).
+- In detailed_content: include extensive detail—list endorsers by name where given, quote key positions, include contact info (phone, email, address if present), policies with specifics. Do not summarize into vague bullet points; preserve as much of the source detail as fits."""
     
     # Run synthesis
     result = await agent.run(prompt)
-    doc = result.data
+    doc = result.output
     
     # Convert to markdown
     markdown = f"""# Reference Document: {website_url}
@@ -78,10 +85,13 @@ Create a comprehensive reference document that an AI agent can use to answer que
 ## Important Details
 {doc.important_details}
 
+## Detailed Content
+{doc.detailed_content or "(No additional detail extracted)"}
+
 ## Contact Information
 {doc.contact_info or "Not available"}
 """
-    
+
     return markdown
 
 

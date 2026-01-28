@@ -14,7 +14,7 @@ class TestMainApplication:
         """Test that FastAPI app is initialized correctly."""
         assert app is not None
         assert app.title == "Facebook Messenger AI Bot"
-        assert app.version == "0.1.0"
+        assert app.version == "0.2.0"
     
     def test_root_endpoint(self, test_client):
         """Test root endpoint."""
@@ -43,7 +43,8 @@ class TestMainApplication:
             facebook_page_access_token="test-token",
             facebook_verify_token="test-verify",
             supabase_url="https://test.supabase.co",
-            supabase_service_key="test-key"
+            supabase_service_key="test-key",
+            pydantic_ai_gateway_api_key="paig_test_key"
         )
         mock_get_settings.return_value = mock_settings
         
@@ -56,12 +57,10 @@ class TestMainApplication:
         assert response.status_code == 403  # No params provided
     
     @patch('src.main.get_supabase_client')
-    @patch('src.main.CopilotService')
     @patch('src.main.get_settings')
     def test_lifespan_startup(
         self,
         mock_get_settings,
-        mock_copilot_service,
         mock_get_supabase
     ):
         """Test application lifespan startup."""
@@ -73,19 +72,13 @@ class TestMainApplication:
             facebook_verify_token="test-verify",
             supabase_url="https://test.supabase.co",
             supabase_service_key="test-key",
-            copilot_cli_host="http://localhost:5909",
-            copilot_enabled=True
+            pydantic_ai_gateway_api_key="paig_test_key"
         )
         mock_get_settings.return_value = mock_settings
         
         # Mock Supabase
         mock_supabase = MagicMock()
         mock_get_supabase.return_value = mock_supabase
-        
-        # Mock Copilot
-        mock_copilot = MagicMock()
-        mock_copilot.is_available = AsyncMock(return_value=True)
-        mock_copilot_service.return_value = mock_copilot
         
         # Test lifespan context manager
         from src.main import lifespan
@@ -98,7 +91,7 @@ class TestMainApplication:
         """Test application metadata."""
         assert app.title == "Facebook Messenger AI Bot"
         assert app.description is not None
-        assert app.version == "0.1.0"
+        assert app.version == "0.2.0"
     
     def test_app_routes(self):
         """Test that all expected routes are registered."""

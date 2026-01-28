@@ -1,6 +1,7 @@
 """PydanticAI agent service using Gateway."""
 
 import logging
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
@@ -10,6 +11,10 @@ from src.config import get_settings
 from src.models.agent_models import AgentContext, AgentResponse
 
 logger = logging.getLogger(__name__)
+
+# Project root (parent of src/)
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_AGENT_SYSTEM_PROMPT_PATH = _PROJECT_ROOT / "prompts" / "agent_system_instructions.md"
 
 
 class MessengerAgentDeps(BaseModel):
@@ -34,37 +39,44 @@ class MessengerAgentService:
         settings = get_settings()
         model_name = model or settings.default_model
         
-        # Create agent with structured output
+        # Create agent with structured output (system_prompt is registered below via decorator)
         self.agent = Agent(
             model_name,
-            result_type=AgentResponse,
-            system_prompt=self._build_system_prompt,
+            output_type=AgentResponse,
+            system_prompt=(),
             retries=2,
+            deps_type=MessengerAgentDeps,
         )
-        
+        self.agent.system_prompt(dynamic=True)(self._build_system_prompt)
+
         # Register tools
         self._register_tools()
         
         logger.info(f"MessengerAgentService initialized with model: {model_name}")
     
+    def _load_system_prompt_template(self) -> str:
+        """Load system prompt from prompts/agent_system_instructions.md."""
+        if not _AGENT_SYSTEM_PROMPT_PATH.exists():
+            raise FileNotFoundError(
+                f"Agent system prompt not found: {_AGENT_SYSTEM_PROMPT_PATH}"
+            )
+        return _AGENT_SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
+
     def _build_system_prompt(self, ctx: RunContext[MessengerAgentDeps]) -> str:
-        """Build dynamic system prompt from context."""
+        """Build dynamic system prompt from context and prompts/agent_system_instructions.md."""
         deps = ctx.deps
-        
-        return f"""You are a {deps.tone} assistant for a political/business Facebook page.
-
-IMPORTANT RULES:
-1. Use ONLY the following reference document as your source of truth
-2. Answer in under 300 characters where possible
-3. If asked about something not covered in the reference document, set requires_escalation=True
-4. Be helpful, accurate, and maintain the specified tone
-
-REFERENCE DOCUMENT:
-{deps.reference_doc}
-
-RECENT CONVERSATION CONTEXT:
-{chr(10).join(deps.recent_messages[-3:]) if deps.recent_messages else "No previous messages"}
-"""
+        template = self._load_system_prompt_template()
+        # Use only the body after --- (title/description above are for humans)
+        if "---" in template:
+            template = template.split("---", 1)[-1].strip()
+        recent = (
+            "\n".join(deps.recent_messages[-6:])
+            if deps.recent_messages
+            else "No previous messages"
+        )
+        return template.replace("{{ tone }}", deps.tone).replace(
+            "{{ reference_doc }}", deps.reference_doc
+        ).replace("{{ recent_messages }}", recent)
     
     def _register_tools(self) -> None:
         """Register any tools the agent can use."""
@@ -107,8 +119,8 @@ RECENT CONVERSATION CONTEXT:
             # Run the agent
             result = await self.agent.run(user_message, deps=deps)
             
-            # Result.data is already typed as AgentResponse
-            response = result.data
+            # Result.output is already typed as AgentResponse
+            response = result.output
             
             # Log usage for debugging
             logger.info(
@@ -148,7 +160,7 @@ RECENT CONVERSATION CONTEXT:
                 settings.default_model,
                 settings.fallback_model,
             ),
-            result_type=AgentResponse,
+            output_type=AgentResponse,
             system_prompt=self._build_system_prompt,
         )
         
@@ -159,7 +171,7 @@ RECENT CONVERSATION CONTEXT:
         )
         
         result = await fallback_agent.run(user_message, deps=deps)
-        return result.data
+        return result.output
 
 
 # Factory function for dependency injection

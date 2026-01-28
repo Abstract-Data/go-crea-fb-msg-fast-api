@@ -1,114 +1,253 @@
 """Website scraping and chunking service."""
 
+import asyncio
 import hashlib
+import os
 import re
 import time
 from typing import List
+from urllib.parse import urljoin, urlparse
 
 import httpx
 import logfire
 from bs4 import BeautifulSoup
 
 
-async def scrape_website(url: str, max_pages: int = 5) -> List[str]:
+def _normalize_url_for_crawl(url: str) -> str:
+    """Strip fragment and trailing slash for dedup; keep scheme and netloc."""
+    parsed = urlparse(url)
+    path = parsed.path.rstrip("/") or "/"
+    normalized = f"{parsed.scheme}://{parsed.netloc}{path}"
+    if parsed.query:
+        normalized += "?" + parsed.query
+    return normalized
+
+
+def _same_domain(base_url: str, link_url: str) -> bool:
+    """True if link_url is same scheme+netloc as base_url (or relative)."""
+    if not link_url or link_url.startswith(("#", "mailto:", "tel:", "javascript:")):
+        return False
+    parsed_base = urlparse(base_url)
+    parsed_link = urlparse(link_url)
+    if not parsed_link.netloc:
+        return True
+    return parsed_link.scheme == parsed_base.scheme and parsed_link.netloc == parsed_base.netloc
+
+
+# Extensions we skip when crawling (binary or non-page resources)
+_NON_HTML_EXTENSIONS = frozenset(
+    (".pdf", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico",
+     ".zip", ".tar", ".gz", ".css", ".js", ".json", ".xml", ".rss",
+     ".mp3", ".mp4", ".webm", ".woff", ".woff2", ".ttf", ".eot")
+)
+
+
+def _extract_same_domain_links(soup: BeautifulSoup, current_url: str) -> List[str]:
+    """Return absolute same-domain URLs from <a href>, normalized and deduped. Skips non-HTML resources."""
+    seen: set[str] = set()
+    out: List[str] = []
+    for a in soup.find_all("a", href=True):
+        href = (a["href"] or "").strip()
+        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        absolute = urljoin(current_url, href)
+        if not _same_domain(current_url, absolute):
+            continue
+        path_lower = urlparse(absolute).path.lower()
+        if any(path_lower.endswith(ext) for ext in _NON_HTML_EXTENSIONS):
+            continue
+        normalized = _normalize_url_for_crawl(absolute)
+        if normalized not in seen:
+            seen.add(normalized)
+            out.append(normalized)
+    return out
+
+
+def _fetch_with_browser_sync(url: str, timeout_seconds: float = 30.0) -> str:
     """
-    Scrape website and return text chunks.
-    
-    Args:
-        url: Root URL to scrape
-        max_pages: Maximum number of pages to scrape
-        
-    Returns:
-        List of text chunks (500-800 words each)
+    Fetch page HTML using undetected headless Chrome (bypasses Cloudflare/bot blocks).
+    Runs synchronously; call via asyncio.to_thread() from async code.
+    Set CHROME_VERSION_MAIN to your Chrome major version (e.g. 143) if you see
+    "This version of ChromeDriver only supports Chrome version X" and your Chrome is different.
     """
-    start_time = time.time()
-    
-    logfire.info(
-        "Starting website scrape",
-        url=url,
-        max_pages=max_pages,
-    )
-    
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        fetch_start = time.time()
+    import undetected_chromedriver as uc
+
+    options = uc.ChromeOptions()
+    options.headless = True
+    version_main = os.environ.get("CHROME_VERSION_MAIN")
+    kwargs = {"options": options}
+    if version_main is not None:
         try:
+            kwargs["version_main"] = int(version_main)
+        except ValueError:
+            pass
+    driver = uc.Chrome(**kwargs)
+    try:
+        driver.set_page_load_timeout(timeout_seconds)
+        driver.get(url)
+        return driver.page_source
+    finally:
+        driver.quit()
+
+
+async def _fetch_one_page(url: str, headers: dict) -> str:
+    """
+    Fetch one URL. Tries httpx first; on 403/503 falls back to undetected Chrome.
+    Raises ValueError on failure.
+    """
+    html: str | None = None
+    try:
+        async with httpx.AsyncClient(
+            timeout=30.0, follow_redirects=True, headers=headers
+        ) as client:
             response = await client.get(url)
             response.raise_for_status()
-            fetch_elapsed = time.time() - fetch_start
-            
+            html = response.text
             logfire.info(
-                "Website fetched successfully",
+                "Page fetched (httpx)",
                 url=url,
                 status_code=response.status_code,
-                content_length=len(response.text),
-                fetch_time_ms=fetch_elapsed * 1000,
+                content_length=len(html),
             )
-        except httpx.HTTPError as e:
-            fetch_elapsed = time.time() - fetch_start
-            logfire.error(
-                "Website fetch failed",
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code in (403, 503):
+            logfire.info(
+                "httpx blocked, falling back to browser",
                 url=url,
-                error=str(e),
-                error_type=type(e).__name__,
-                fetch_time_ms=fetch_elapsed * 1000,
+                status_code=e.response.status_code,
             )
-            raise ValueError(f"Failed to fetch {url}: {e}")
-    
-    parse_start = time.time()
-    soup = BeautifulSoup(response.text, "html.parser")
-    
-    # Remove script and style elements
-    for script in soup(["script", "style", "nav", "footer"]):
-        script.decompose()
-    
-    # Extract text
+            html = await asyncio.to_thread(_fetch_with_browser_sync, url, 30.0)
+            logfire.info("Page fetched via browser", url=url, content_length=len(html))
+        else:
+            raise ValueError(f"Failed to fetch {url}: {e}") from e
+    except httpx.HTTPError as e:
+        raise ValueError(f"Failed to fetch {url}: {e}") from e
+    if not html:
+        raise ValueError(f"Failed to fetch {url}: no content")
+    return html
+
+
+def _parse_page_text_and_links(html: str, current_url: str) -> tuple[str, List[str]]:
+    """
+    Parse HTML: extract visible text (nav/footer removed) and same-domain links.
+    Returns (normalized_text, list_of_absolute_same_domain_urls).
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "nav", "footer"]):
+        tag.decompose()
     text = soup.get_text()
-    
-    # Normalize whitespace
-    text = re.sub(r'\s+', ' ', text)
-    text = text.strip()
-    
-    # Calculate content hash
-    content_hash = hashlib.sha256(text.encode()).hexdigest()
-    
-    # Chunk into 500-800 word segments
-    words = text.split()
-    chunks = []
-    current_chunk = []
+    text = re.sub(r"\s+", " ", text).strip()
+    links = _extract_same_domain_links(soup, current_url)
+    return text, links
+
+
+async def scrape_website(url: str, max_pages: int = 20) -> List[str]:
+    """
+    Scrape website and return text chunks from multiple same-domain pages.
+    Discovers internal links from each page and crawls up to max_pages.
+    Tries httpx first per page; on 403/503 (e.g. Cloudflare) falls back to undetected Chrome.
+
+    Args:
+        url: Root URL to scrape (start page)
+        max_pages: Maximum number of pages to scrape (default 20 for richer reference docs)
+
+    Returns:
+        List of text chunks (500-800 words each) from all crawled pages combined
+    """
+    start_time = time.time()
+    normalized_start = _normalize_url_for_crawl(url)
+    logfire.info(
+        "Starting website scrape (multi-page)",
+        url=normalized_start,
+        max_pages=max_pages,
+    )
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    visited: set[str] = set()
+    to_visit: List[str] = [url]  # exact start URL so first fetch matches user/tests
+    in_queue: set[str] = {_normalize_url_for_crawl(url)}
+    page_texts: List[str] = []
+
+    while to_visit and len(visited) < max_pages:
+        current = to_visit.pop(0)
+        current_normalized = _normalize_url_for_crawl(current)
+        if current_normalized in visited:
+            continue
+        visited.add(current_normalized)
+
+        try:
+            html = await _fetch_one_page(current, headers)
+        except ValueError:
+            if not page_texts:
+                raise
+            logfire.warning("Skipping page after fetch error", url=current)
+            continue
+
+        text, new_links = _parse_page_text_and_links(html, current)
+        # If first page has very little text (likely JS-rendered SPA), refetch with browser
+        if len(visited) == 1 and len(text.split()) < 400:
+            logfire.info(
+                "First page has little text, refetching with browser (likely JS-rendered)",
+                url=current,
+                word_count=len(text.split()),
+            )
+            try:
+                html = await asyncio.to_thread(_fetch_with_browser_sync, current, 45.0)
+                text, new_links = _parse_page_text_and_links(html, current)
+            except Exception as e:
+                logfire.warning("Browser refetch failed, using initial content", url=current, error=str(e))
+        if text:
+            page_texts.append(text)
+
+        for link in new_links:
+            link_norm = _normalize_url_for_crawl(link)
+            if link_norm not in visited and link_norm not in in_queue:
+                in_queue.add(link_norm)
+                to_visit.append(link)
+
+        # Polite delay between requests
+        if to_visit and len(visited) < max_pages:
+            await asyncio.sleep(0.5)
+
+    combined_text = " ".join(page_texts)
+    combined_text = re.sub(r"\s+", " ", combined_text).strip()
+
+    content_hash = hashlib.sha256(combined_text.encode()).hexdigest()
+    words = combined_text.split()
+    chunks: List[str] = []
+    current_chunk: List[str] = []
     current_word_count = 0
-    target_words = 650  # Target middle of 500-800 range
-    
+    target_words = 650
+
     for word in words:
         current_chunk.append(word)
         current_word_count += 1
-        
         if current_word_count >= target_words:
-            chunks.append(' '.join(current_chunk))
+            chunks.append(" ".join(current_chunk))
             current_chunk = []
             current_word_count = 0
-    
-    # Add remaining words
     if current_chunk:
-        chunks.append(' '.join(current_chunk))
-    
-    parse_elapsed = time.time() - parse_start
+        chunks.append(" ".join(current_chunk))
+
     total_elapsed = time.time() - start_time
-    
-    # Calculate chunk statistics
-    chunk_sizes = [len(chunk.split()) for chunk in chunks]
-    avg_chunk_size = sum(chunk_sizes) / len(chunks) if chunks else 0
-    
+    chunk_sizes = [len(c.split()) for c in chunks]
+    avg_chunk = sum(chunk_sizes) / len(chunks) if chunks else 0
     logfire.info(
         "Website scrape completed",
-        url=url,
+        url=normalized_start,
+        pages_scraped=len(visited),
         total_words=len(words),
         chunk_count=len(chunks),
-        avg_chunk_size_words=avg_chunk_size,
-        min_chunk_size_words=min(chunk_sizes) if chunk_sizes else 0,
-        max_chunk_size_words=max(chunk_sizes) if chunk_sizes else 0,
+        avg_chunk_size_words=avg_chunk,
         content_hash=content_hash,
-        parse_time_ms=parse_elapsed * 1000,
         total_time_ms=total_elapsed * 1000,
     )
-    
     return chunks

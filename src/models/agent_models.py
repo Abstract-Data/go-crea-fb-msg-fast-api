@@ -16,7 +16,7 @@ class AgentResponse(BaseModel):
     """
     Agent response with confidence and escalation flags.
     
-    This model is used as result_type for PydanticAI,
+    This model is used as output_type for PydanticAI,
     ensuring structured, typed responses from the LLM.
     """
     message: str = Field(

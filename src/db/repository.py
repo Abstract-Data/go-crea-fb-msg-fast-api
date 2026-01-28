@@ -202,6 +202,31 @@ def get_reference_document(doc_id: str) -> Optional[dict]:
     return result.data[0]
 
 
+def get_reference_document_by_source_url(source_url: str) -> Optional[dict]:
+    """
+    Get the most recent reference document for a given source URL.
+    Used to resume setup: if we already scraped and saved a doc for this URL,
+    we skip scrape/build and proceed to tone and Facebook config.
+    
+    Returns:
+        Document dict with 'id', 'content_hash', etc., or None
+    """
+    if not source_url or not source_url.strip():
+        return None
+    supabase = get_supabase_client()
+    result = (
+        supabase.table("reference_documents")
+        .select("*")
+        .eq("source_url", source_url.strip())
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        return None
+    return result.data[0]
+
+
 def save_message_history(
     bot_id: str,
     sender_id: str,

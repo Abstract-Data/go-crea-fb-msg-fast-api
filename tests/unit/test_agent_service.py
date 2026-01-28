@@ -37,7 +37,7 @@ class TestMessengerAgentService:
         with patch('src.services.agent_service.Agent') as MockAgent:
             # Setup mock result
             mock_result = MagicMock()
-            mock_result.data = AgentResponse(
+            mock_result.output = AgentResponse(
                 message="Test response",
                 confidence=0.9,
                 requires_escalation=False,
@@ -46,8 +46,8 @@ class TestMessengerAgentService:
             # Create mock agent instance with properly configured async run method
             mock_agent_instance = MagicMock()
             mock_agent_instance.run = AsyncMock(return_value=mock_result)
-            # Mock the tool decorator to avoid issues
             mock_agent_instance.tool = MagicMock(return_value=lambda f: f)
+            mock_agent_instance.system_prompt = MagicMock(return_value=lambda f: f)
             MockAgent.return_value = mock_agent_instance
             
             # Test - create service after patching
@@ -103,7 +103,7 @@ class TestMessengerAgentService:
         
         with patch('src.services.agent_service.Agent') as MockAgent:
             mock_result = MagicMock()
-            mock_result.data = AgentResponse(
+            mock_result.output = AgentResponse(
                 message="Test",
                 confidence=0.8,
                 requires_escalation=False,
@@ -128,7 +128,7 @@ class TestMessengerAgentService:
         with patch('src.services.agent_service.Agent') as MockAgent, \
              patch('src.services.agent_service.FallbackModel') as MockFallbackModel:
             mock_result = MagicMock()
-            mock_result.data = AgentResponse(
+            mock_result.output = AgentResponse(
                 message="Fallback response",
                 confidence=0.8,
                 requires_escalation=False,
@@ -148,28 +148,28 @@ class TestMessengerAgentService:
     
     @pytest.mark.asyncio
     async def test_system_prompt_includes_reference_doc(self, agent_context, mock_settings):
-        """Test that system prompt includes reference document."""
+        """Test that system prompt is registered and respond uses reference doc via deps."""
         with patch('src.services.agent_service.Agent') as MockAgent:
             mock_result = MagicMock()
-            mock_result.data = AgentResponse(
+            mock_result.output = AgentResponse(
                 message="Test",
                 confidence=0.8,
                 requires_escalation=False,
             )
-            
             mock_agent_instance = MagicMock()
             mock_agent_instance.run = AsyncMock(return_value=mock_result)
             mock_agent_instance.tool = MagicMock(return_value=lambda f: f)
+            mock_agent_instance.system_prompt = MagicMock(return_value=lambda f: f)
             MockAgent.return_value = mock_agent_instance
-            
+
             service = MessengerAgentService()
             await service.respond(agent_context, "Test message")
-            
-            # Verify Agent was initialized with system_prompt function
+
+            # Agent created with system_prompt=() and deps_type; dynamic prompt registered via .system_prompt()
             MockAgent.assert_called_once()
             call_kwargs = MockAgent.call_args[1]
-            assert 'system_prompt' in call_kwargs
-            assert callable(call_kwargs['system_prompt'])
+            assert call_kwargs.get('system_prompt') == ()
+            assert mock_agent_instance.system_prompt.called
     
     def test_agent_initialization_with_custom_model(self, mock_settings):
         """Test agent initialization with custom model."""
