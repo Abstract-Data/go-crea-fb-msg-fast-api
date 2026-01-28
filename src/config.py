@@ -61,6 +61,16 @@ class Settings(BaseSettings):
         default="local",
         description="Current environment"
     )
+    
+    # Sentry Configuration
+    sentry_dsn: str | None = Field(
+        default=None,
+        description="Sentry DSN for error tracking (optional)"
+    )
+    sentry_traces_sample_rate: float = Field(
+        default=1.0,
+        description="Sentry traces sample rate (0.0 to 1.0)"
+    )
 
 
 @lru_cache()

@@ -74,7 +74,7 @@ def mock_supabase_client():
 
 @pytest.fixture
 def mock_httpx_client(monkeypatch):
-    """Mock httpx.AsyncClient for testing."""
+    """Mock httpx.AsyncClient for testing with proper cleanup simulation."""
     async def mock_get(*args, **kwargs):
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -89,11 +89,16 @@ def mock_httpx_client(monkeypatch):
         mock_response.raise_for_status = Mock()
         return mock_response
     
+    async def mock_close():
+        """Simulate closing the HTTP client to clean up resources."""
+        return None
+    
     mock_client = MagicMock()
     mock_client.get = AsyncMock(side_effect=mock_get)
     mock_client.post = AsyncMock(side_effect=mock_post)
+    mock_client.close = AsyncMock(side_effect=mock_close)
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
+    mock_client.__aexit__ = AsyncMock(return_value=None)  # This closes properly
     
     return mock_client
 

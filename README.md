@@ -1,3 +1,7 @@
+[![CI](https://github.com/Abstract-Data/go-crea-fb-msg-fast-api/actions/workflows/ci.yml/badge.svg)](https://github.com/Abstract-Data/go-crea-fb-msg-fast-api/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/Abstract-Data/go-crea-fb-msg-fast-api/graph/badge.svg?token=VX987UWNEE)](https://codecov.io/gh/Abstract-Data/go-crea-fb-msg-fast-api)
+[![Sentry](https://img.shields.io/badge/Sentry-enabled-green)](https://sentry.io)
+
 # Facebook Messenger AI Bot
 
 Production-ready FastAPI application that creates AI-powered Facebook Messenger bots. The system scrapes websites, generates a reference document using the GitHub Copilot SDK, and uses a PydanticAI agent to answer questions for people messaging a Facebook Page. This is the foundation for a turnkey product for political campaigns.
@@ -101,6 +105,8 @@ See `.env.example` for all required environment variables:
 - `COPILOT_CLI_HOST` - Copilot CLI host (default: http://localhost:5909)
 - `COPILOT_ENABLED` - Enable Copilot SDK (default: True)
 - `OPENAI_API_KEY` - Fallback API key
+- `SENTRY_DSN` - Sentry DSN for error tracking (optional)
+- `SENTRY_TRACES_SAMPLE_RATE` - Sentry traces sample rate (default: 1.0)
 - `ENV` - Environment (local, railway, prod)
 
 ## Deployment
