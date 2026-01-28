@@ -2,14 +2,10 @@
 
 import asyncio
 import typer
-from typing_extensions import Annotated
 
 from src.services.scraper import scrape_website
-from src.services.reference_doc import build_reference_doc
-from src.services.copilot_service import CopilotService
+from src.services.reference_doc import build_reference_document
 from src.db.repository import create_bot_configuration, create_reference_document
-from src.db.client import get_supabase_client
-from src.config import get_settings
 
 app = typer.Typer()
 
@@ -80,17 +76,11 @@ def setup():
     """
     Interactive setup:
     1) Ask for website
-    2) Scrape + build reference doc via Copilot
+    2) Scrape + build reference doc via PydanticAI Gateway
     3) Ask for tone (with recommendations)
     4) Ask for Facebook Page config
     5) Persist bot config in Supabase
     """
-    settings = get_settings()
-    supabase = get_supabase_client()
-    copilot = CopilotService(
-        base_url=settings.copilot_cli_host,
-        enabled=settings.copilot_enabled
-    )
     
     # Step 1: Website URL
     website_url = typer.prompt("What website should the bot be based on?")
@@ -104,18 +94,21 @@ def setup():
         raise typer.Exit(1)
     
     # Step 2: Build reference doc
-    typer.echo("Generating reference document via Copilot...")
+    typer.echo("Generating reference document via PydanticAI Gateway...")
     try:
-        markdown_content, content_hash = _run_async_with_cleanup(
-            build_reference_doc(copilot, website_url, text_chunks)
+        markdown_content = _run_async_with_cleanup(
+            build_reference_document(website_url, text_chunks)
         )
+        # Calculate content hash
+        import hashlib
+        content_hash = hashlib.sha256(markdown_content.encode()).hexdigest()
         typer.echo("✓ Reference document generated")
     except Exception as e:
         typer.echo(f"✗ Error generating reference doc: {e}", err=True)
         raise typer.Exit(1)
     
     # Step 3: Tone selection
-    # TODO: Use Copilot to suggest tones from content
+    # TODO: Use AI to suggest tones from content
     recommended_tones = ["Professional", "Friendly", "Casual"]
     typer.echo(f"\nRecommended tones: {', '.join(recommended_tones)}")
     tone = typer.prompt("Select a tone", default="Professional")
@@ -141,7 +134,7 @@ def setup():
     # Step 6: Create bot configuration
     typer.echo("\nCreating bot configuration...")
     try:
-        bot_config = create_bot_configuration(
+        create_bot_configuration(
             page_id=page_id,
             website_url=website_url,
             reference_doc_id=reference_doc_id,
@@ -158,10 +151,10 @@ def setup():
     typer.echo("\n" + "="*60)
     typer.echo("✓ Setup complete!")
     typer.echo("\nNext steps:")
-    typer.echo(f"1. Configure webhook URL in Facebook App settings:")
-    typer.echo(f"   https://your-railway-url.railway.app/webhook")
+    typer.echo("1. Configure webhook URL in Facebook App settings:")
+    typer.echo("   https://your-railway-url.railway.app/webhook")
     typer.echo(f"2. Set verify token: {verify_token}")
-    typer.echo(f"3. Subscribe to 'messages' events")
+    typer.echo("3. Subscribe to 'messages' events")
     typer.echo("="*60)
 
 

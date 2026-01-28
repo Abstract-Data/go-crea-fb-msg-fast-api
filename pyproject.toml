@@ -1,14 +1,14 @@
 [project]
 name = "facebook-messenger-scrape-bot"
 version = "0.1.0"
-description = "Production-ready FastAPI application for AI-powered Facebook Messenger bots using Copilot SDK and PydanticAI"
+description = "Production-ready FastAPI application for AI-powered Facebook Messenger bots using PydanticAI Gateway"
 readme = "README.md"
 requires-python = ">=3.12.8"
 dependencies = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
     "pydantic>=2.0.0",
-    "pydantic-ai>=0.0.10",
+    "pydantic-ai>=1.16.0",
     "pydantic-settings>=2.0.0",
     "httpx>=0.25.0",
     "beautifulsoup4>=4.12.0",
@@ -17,6 +17,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "sentry-sdk[fastapi,pydantic-ai]>=2.50.0",
     "logfire[fastapi,pydantic]>=1.0.0",
+    "pydantic-ai-slim[logfire]>=1.16.0",
 ]
 
 [project.optional-dependencies]
@@ -78,4 +79,17 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",
     "@abstractmethod",
+]
+
+[dependency-groups]
+dev = [
+    "faker>=40.1.2",
+    "hypothesis>=6.151.2",
+    "mypy>=1.19.1",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.0.0",
+    "pytest-mock>=3.15.1",
+    "respx>=0.22.0",
+    "ruff>=0.14.14",
 ]
