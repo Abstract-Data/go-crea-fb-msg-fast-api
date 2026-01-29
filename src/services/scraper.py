@@ -5,12 +5,41 @@ import hashlib
 import os
 import re
 import time
+from datetime import datetime, timezone
 from typing import List
 from urllib.parse import urljoin, urlparse
 
 import httpx
 import logfire
 from bs4 import BeautifulSoup
+
+from src.models.scraper_models import ScrapedPage, ScrapeResult
+
+
+def chunk_text(text: str, target_words: int = 650) -> List[tuple[str, int]]:
+    """
+    Split text into chunks of approximately target_words each.
+
+    Returns list of (chunk_text, word_count) for each chunk.
+    """
+    if not text or not text.strip():
+        return []
+    words = text.strip().split()
+    if not words:
+        return []
+    result: List[tuple[str, int]] = []
+    current: List[str] = []
+    current_count = 0
+    for word in words:
+        current.append(word)
+        current_count += 1
+        if current_count >= target_words:
+            result.append((" ".join(current), current_count))
+            current = []
+            current_count = 0
+    if current:
+        result.append((" ".join(current), current_count))
+    return result
 
 
 def _normalize_url_for_crawl(url: str) -> str:
@@ -152,10 +181,10 @@ async def _fetch_one_page(url: str, headers: dict) -> str:
     return html
 
 
-def _parse_page_text_and_links(html: str, current_url: str) -> tuple[str, List[str]]:
+def _parse_page_text_and_links(html: str, current_url: str) -> tuple[str, List[str], str]:
     """
-    Parse HTML: extract visible text (nav/footer removed) and same-domain links.
-    Returns (normalized_text, list_of_absolute_same_domain_urls).
+    Parse HTML: extract visible text (nav/footer removed), same-domain links, and title.
+    Returns (normalized_text, list_of_absolute_same_domain_urls, page_title).
     """
     soup = BeautifulSoup(html, "html.parser")
     for tag in soup(["script", "style", "nav", "footer"]):
@@ -163,12 +192,15 @@ def _parse_page_text_and_links(html: str, current_url: str) -> tuple[str, List[s
     text = soup.get_text()
     text = re.sub(r"\s+", " ", text).strip()
     links = _extract_same_domain_links(soup, current_url)
-    return text, links
+    title = ""
+    if soup.title and soup.title.string:
+        title = soup.title.string.strip()
+    return text, links, title
 
 
-async def scrape_website(url: str, max_pages: int = 20) -> List[str]:
+async def scrape_website(url: str, max_pages: int = 20) -> ScrapeResult:
     """
-    Scrape website and return text chunks from multiple same-domain pages.
+    Scrape website and return per-page data plus text chunks from multiple same-domain pages.
     Discovers internal links from each page and crawls up to max_pages.
     Tries httpx first per page; on 403/503 (e.g. Cloudflare) falls back to undetected Chrome.
 
@@ -177,7 +209,7 @@ async def scrape_website(url: str, max_pages: int = 20) -> List[str]:
         max_pages: Maximum number of pages to scrape (default 20 for richer reference docs)
 
     Returns:
-        List of text chunks (500-800 words each) from all crawled pages combined
+        ScrapeResult with pages (URL, title, content per page), chunks, and content_hash
     """
     start_time = time.time()
     normalized_start = _normalize_url_for_crawl(url)
@@ -199,7 +231,7 @@ async def scrape_website(url: str, max_pages: int = 20) -> List[str]:
     visited: set[str] = set()
     to_visit: List[str] = [url]  # exact start URL so first fetch matches user/tests
     in_queue: set[str] = {_normalize_url_for_crawl(url)}
-    page_texts: List[str] = []
+    pages: List[ScrapedPage] = []
 
     while to_visit and len(visited) < max_pages:
         current = to_visit.pop(0)
@@ -211,12 +243,12 @@ async def scrape_website(url: str, max_pages: int = 20) -> List[str]:
         try:
             html = await _fetch_one_page(current, headers)
         except ValueError:
-            if not page_texts:
+            if not pages:
                 raise
             logfire.warning("Skipping page after fetch error", url=current)
             continue
 
-        text, new_links = _parse_page_text_and_links(html, current)
+        text, new_links, title = _parse_page_text_and_links(html, current)
         # If first page has very little text (likely JS-rendered SPA), refetch with browser
         if len(visited) == 1 and len(text.split()) < 400:
             logfire.info(
@@ -226,7 +258,7 @@ async def scrape_website(url: str, max_pages: int = 20) -> List[str]:
             )
             try:
                 html = await asyncio.to_thread(_fetch_with_browser_sync, current, 45.0)
-                text, new_links = _parse_page_text_and_links(html, current)
+                text, new_links, title = _parse_page_text_and_links(html, current)
             except Exception as e:
                 logfire.warning(
                     "Browser refetch failed, using initial content",
@@ -234,7 +266,17 @@ async def scrape_website(url: str, max_pages: int = 20) -> List[str]:
                     error=str(e),
                 )
         if text:
-            page_texts.append(text)
+            word_count = len(text.split())
+            pages.append(
+                ScrapedPage(
+                    url=current,
+                    normalized_url=current_normalized,
+                    title=title,
+                    content=text,
+                    word_count=word_count,
+                    scraped_at=datetime.now(timezone.utc),
+                )
+            )
 
         for link in new_links:
             link_norm = _normalize_url_for_crawl(link)
@@ -246,6 +288,7 @@ async def scrape_website(url: str, max_pages: int = 20) -> List[str]:
         if to_visit and len(visited) < max_pages:
             await asyncio.sleep(0.5)
 
+    page_texts = [p.content for p in pages]
     combined_text = " ".join(page_texts)
     combined_text = re.sub(r"\s+", " ", combined_text).strip()
 
@@ -279,4 +322,4 @@ async def scrape_website(url: str, max_pages: int = 20) -> List[str]:
         content_hash=content_hash,
         total_time_ms=total_elapsed * 1000,
     )
-    return chunks
+    return ScrapeResult(pages=pages, chunks=chunks, content_hash=content_hash)

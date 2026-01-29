@@ -22,13 +22,17 @@ from typing import Callable
 import questionary
 import typer
 
-from src.services.scraper import scrape_website
+from src.services.scraper import chunk_text, scrape_website
 from src.services.reference_doc import build_reference_document
+from src.services.embedding_service import generate_embeddings
 from src.db.repository import (
     create_bot_configuration,
     create_reference_document,
+    create_page_chunks,
+    create_scraped_page,
     create_test_session,
     get_reference_document_by_source_url,
+    get_scraped_pages_by_reference_doc,
     save_test_message,
 )
 from src.models.agent_models import AgentContext
@@ -282,6 +286,7 @@ def _run_test_repl(
     """
     context = AgentContext(
         bot_config_id="cli-test",
+        reference_doc_id=reference_doc_id,
         reference_doc=ref_doc_content,
         tone=tone,
         recent_messages=[],
@@ -379,12 +384,55 @@ def setup():
         ref_doc_content = existing_doc["content"]
         typer.echo(f"✓ Found existing reference document for {normalized_url}")
         typer.echo("  Skipping scrape and document generation.")
+        # If no page index exists yet, scrape and index pages only (do not modify reference doc)
+        existing_pages = get_scraped_pages_by_reference_doc(reference_doc_id)
+        if not existing_pages:
+            typer.echo("  No page index found. Scraping pages for search index only...")
+            try:
+                scrape_result = _run_async_with_cleanup(scrape_website(normalized_url))
+                typer.echo(f"  ✓ Scraped {len(scrape_result.pages)} pages")
+                typer.echo("  Indexing pages and generating embeddings...")
+                async def _index_pages_and_chunks():
+                    for page in scrape_result.pages:
+                        scraped_page_id = create_scraped_page(
+                            reference_doc_id=reference_doc_id,
+                            url=page.url,
+                            normalized_url=page.normalized_url,
+                            title=page.title,
+                            raw_content=page.content,
+                            word_count=page.word_count,
+                            scraped_at=page.scraped_at,
+                        )
+                        page_chunk_tuples = chunk_text(page.content)
+                        if not page_chunk_tuples:
+                            continue
+                        chunk_texts = [t[0] for t in page_chunk_tuples]
+                        embeddings = await generate_embeddings(chunk_texts)
+                        chunks_with_embeddings = [
+                            (chunk_texts[i], embeddings[i], page_chunk_tuples[i][1])
+                            for i in range(len(chunk_texts))
+                        ]
+                        create_page_chunks(scraped_page_id, chunks_with_embeddings)
+                    return len(scrape_result.pages)
+                page_count = _run_async_with_cleanup(_index_pages_and_chunks())
+                typer.echo(f"  ✓ Indexed {page_count} pages with embeddings")
+            except Exception as e:
+                typer.echo(
+                    typer.style(
+                        f"  ⚠ Page indexing failed (search_pages tool will be empty): {e}",
+                        fg=typer.colors.YELLOW,
+                    ),
+                    err=True,
+                )
+        else:
+            typer.echo(f"  Page index already has {len(existing_pages)} pages.")
     else:
         # Step 2a: Scrape
         typer.echo(f"Scraping {normalized_url}...")
         try:
-            text_chunks = _run_async_with_cleanup(scrape_website(normalized_url))
-            typer.echo(f"✓ Scraped {len(text_chunks)} text chunks")
+            scrape_result = _run_async_with_cleanup(scrape_website(normalized_url))
+            text_chunks = scrape_result.chunks
+            typer.echo(f"✓ Scraped {len(text_chunks)} text chunks from {len(scrape_result.pages)} pages")
         except Exception as e:
             typer.echo(f"✗ Error scraping website: {e}", err=True)
             raise typer.Exit(1)
@@ -414,6 +462,44 @@ def setup():
             typer.echo(f"✗ Error storing reference document: {e}", err=True)
             raise typer.Exit(1)
         ref_doc_content = markdown_content
+
+        # Step 2d: Index scraped pages and chunks with embeddings for semantic search
+        typer.echo("Indexing pages and generating embeddings...")
+        try:
+
+            async def _index_pages_and_chunks():
+                for page in scrape_result.pages:
+                    scraped_page_id = create_scraped_page(
+                        reference_doc_id=reference_doc_id,
+                        url=page.url,
+                        normalized_url=page.normalized_url,
+                        title=page.title,
+                        raw_content=page.content,
+                        word_count=page.word_count,
+                        scraped_at=page.scraped_at,
+                    )
+                    page_chunk_tuples = chunk_text(page.content)
+                    if not page_chunk_tuples:
+                        continue
+                    chunk_texts = [t[0] for t in page_chunk_tuples]
+                    embeddings = await generate_embeddings(chunk_texts)
+                    chunks_with_embeddings = [
+                        (chunk_texts[i], embeddings[i], page_chunk_tuples[i][1])
+                        for i in range(len(chunk_texts))
+                    ]
+                    create_page_chunks(scraped_page_id, chunks_with_embeddings)
+                return len(scrape_result.pages)
+
+            page_count = _run_async_with_cleanup(_index_pages_and_chunks())
+            typer.echo(f"✓ Indexed {page_count} pages with embeddings")
+        except Exception as e:
+            typer.echo(
+                typer.style(
+                    f"⚠ Indexing failed (search_pages tool will be empty): {e}",
+                    fg=typer.colors.YELLOW,
+                ),
+                err=True,
+            )
 
     # Step 3: Action menu (arrow-key); loop so user can Test then Continue or Exit
     while True:

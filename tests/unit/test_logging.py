@@ -57,6 +57,7 @@ async def test_agent_service_logs_processing(
     agent = MessengerAgentService()
     context = AgentContext(
         bot_config_id="bot-123",
+        reference_doc_id="ref-doc-123",
         reference_doc="Test reference",
         tone="professional",
         recent_messages=[],
@@ -96,7 +97,8 @@ async def test_scraper_logs_scraping_metrics(logfire_capture, respx_mock):
         )
     )
 
-    chunks = await scrape_website("https://example.com")
+    result = await scrape_website("https://example.com")
+    _ = result.chunks  # ensure we have chunks for log verification
 
     # Verify scraping logs
     scrape_logs = [

@@ -50,6 +50,20 @@ class Settings(BaseSettings):
         description="Fallback Anthropic model if primary fails",
     )
 
+    # Embedding (via PydanticAI Gateway)
+    embedding_model: str = Field(
+        default="gateway/openai:text-embedding-3-small",
+        description="Embedding model via PAIG (e.g. gateway/openai:text-embedding-3-small)",
+    )
+    embedding_dimensions: int = Field(
+        default=1536,
+        description="Embedding vector dimension (matches text-embedding-3-small)",
+    )
+    search_result_limit: int = Field(
+        default=5,
+        description="Max number of chunks to return from page search",
+    )
+
     # OpenAI Configuration (kept for direct fallback if needed)
     openai_api_key: str = Field(
         default="", description="OpenAI API key (legacy fallback)"

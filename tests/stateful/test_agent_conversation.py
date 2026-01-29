@@ -35,6 +35,7 @@ class TestAgentConversationStateful:
         # Initialize conversation state
         context = AgentContext(
             bot_config_id="test-123",
+            reference_doc_id="test-ref-doc-id",
             reference_doc="# Overview\nTest content for the agent.",
             tone="professional",
             recent_messages=[],
@@ -99,6 +100,7 @@ class TestAgentConversationStateful:
 
         context = AgentContext(
             bot_config_id="test-123",
+            reference_doc_id="test-ref-doc-id",
             reference_doc="# Overview\nTest content.",
             tone="professional",
             recent_messages=[],
