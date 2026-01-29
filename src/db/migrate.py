@@ -21,6 +21,7 @@ load_dotenv(_project_root / ".env.local")
 def run_migrations() -> None:
     """Apply migration SQL files in migrations/ in order."""
     import os
+
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise SystemExit(
@@ -38,6 +39,7 @@ def run_migrations() -> None:
         raise SystemExit(f"No .sql files found in {migrations_dir}")
 
     import psycopg
+
     try:
         with psycopg.connect(database_url, autocommit=True) as conn:
             with conn.cursor() as cur:

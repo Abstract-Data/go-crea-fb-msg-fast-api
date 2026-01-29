@@ -94,6 +94,8 @@ This will guide you through:
 4. Facebook Page configuration
 5. Bot configuration persistence
 
+When you choose **Test the bot** (or run `uv run python -m src.cli.setup_cli test`), conversations are persisted to Supabase (`test_sessions`, `test_messages`) so you can inspect them in the Supabase Dashboard while testing.
+
 ## Environment Variables
 
 See `.env.example` for all required environment variables:
