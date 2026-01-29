@@ -11,7 +11,10 @@ from src.models.agent_models import AgentResponse
 from src.cli.setup_cli import (
     setup,
     test as cli_test_command,
+    _prompt_with_help,
+    _prompt_with_validation,
     _run_test_repl,
+    _show_facebook_credential_help,
     _validate_page_id,
     _validate_page_access_token,
     _validate_verify_token,
@@ -527,6 +530,119 @@ class TestSetupCLI:
     @patch("src.cli.setup_cli.get_reference_document_by_source_url")
     @patch("src.config.get_settings")
     @patch("src.db.client.get_supabase_client")
+    @patch("src.cli.setup_cli.questionary.select")
+    @patch("src.cli.setup_cli.typer.confirm")
+    @patch("src.cli.setup_cli.typer.prompt")
+    @patch("src.cli.setup_cli.typer.echo")
+    def test_setup_aborts_when_confirmation_no(
+        self,
+        mock_echo,
+        mock_prompt,
+        mock_confirm,
+        mock_questionary_select,
+        mock_get_supabase,
+        mock_get_settings,
+        mock_get_ref_doc,
+        mock_scrape,
+        mock_build_ref,
+        mock_create_ref_doc,
+        mock_create_bot,
+    ):
+        """When user answers no to 'Do these look correct?', setup aborts and does not create bot."""
+        mock_get_ref_doc.return_value = None
+        mock_confirm.return_value = False  # user says no
+        mock_settings = MagicMock()
+        mock_settings.copilot_cli_host = "http://localhost:5909"
+        mock_settings.copilot_enabled = True
+        mock_get_settings.return_value = mock_settings
+        mock_scrape.return_value = ["chunk1"]
+        mock_build_ref.return_value = "# Doc"
+        mock_create_ref_doc.return_value = "doc-123"
+        mock_questionary_select.return_value.ask.side_effect = [
+            ACTION_CONTINUE,
+            "Professional",
+        ]
+        mock_prompt.side_effect = [
+            "https://example.com",
+            VALID_PAGE_ID,
+            VALID_PAGE_ACCESS_TOKEN,
+            VALID_VERIFY_TOKEN,
+        ]
+        with pytest.raises(typer.Exit):
+            setup()
+        mock_create_bot.assert_not_called()
+        # Should have echoed aborted message
+        echo_calls = [str(call) for call in mock_echo.call_args_list]
+        assert any("Aborted" in call for call in echo_calls)
+
+    @patch("src.cli.setup_cli.create_bot_configuration")
+    @patch("src.cli.setup_cli.create_reference_document")
+    @patch("src.cli.setup_cli.build_reference_document")
+    @patch("src.cli.setup_cli.scrape_website")
+    @patch("src.cli.setup_cli.get_reference_document_by_source_url")
+    @patch("src.config.get_settings")
+    @patch("src.db.client.get_supabase_client")
+    @patch("src.cli.setup_cli.questionary.select")
+    @patch("src.cli.setup_cli.typer.confirm")
+    @patch("src.cli.setup_cli.typer.prompt")
+    @patch("src.cli.setup_cli.typer.echo")
+    def test_setup_writes_webhook_info_file(
+        self,
+        mock_echo,
+        mock_prompt,
+        mock_confirm,
+        mock_questionary_select,
+        mock_get_supabase,
+        mock_get_settings,
+        mock_get_ref_doc,
+        mock_scrape,
+        mock_build_ref,
+        mock_create_ref_doc,
+        mock_create_bot,
+        tmp_path,
+    ):
+        """After successful setup, WEBHOOK_INFO.txt is written with callback URL, verify token, page ID."""
+        # Patch _project_root to tmp_path so we can read the written file
+        with patch("src.cli.setup_cli._project_root", tmp_path):
+            mock_get_ref_doc.return_value = None
+            mock_confirm.return_value = True
+            mock_settings = MagicMock()
+            mock_settings.copilot_cli_host = "http://localhost:5909"
+            mock_settings.copilot_enabled = True
+            mock_get_settings.return_value = mock_settings
+            mock_scrape.return_value = ["chunk1"]
+            mock_build_ref.return_value = "# Doc"
+            mock_create_ref_doc.return_value = "doc-123"
+            mock_create_bot.return_value = MagicMock()
+            mock_questionary_select.return_value.ask.side_effect = [
+                ACTION_CONTINUE,
+                "Professional",
+            ]
+            mock_prompt.side_effect = [
+                "https://example.com",
+                VALID_PAGE_ID,
+                VALID_PAGE_ACCESS_TOKEN,
+                VALID_VERIFY_TOKEN,
+            ]
+            setup()
+
+        webhook_file = tmp_path / "WEBHOOK_INFO.txt"
+        assert webhook_file.exists()
+        content = webhook_file.read_text(encoding="utf-8")
+        assert "FACEBOOK WEBHOOK CONFIGURATION" in content
+        assert "Callback URL: https://YOUR-APP-NAME.railway.app/webhook" in content
+        assert f"Verify Token: {VALID_VERIFY_TOKEN}" in content
+        assert f"Page ID: {VALID_PAGE_ID}" in content
+        assert "Generated:" in content
+        assert "messages (required)" in content
+
+    @patch("src.cli.setup_cli.create_bot_configuration")
+    @patch("src.cli.setup_cli.create_reference_document")
+    @patch("src.cli.setup_cli.build_reference_document")
+    @patch("src.cli.setup_cli.scrape_website")
+    @patch("src.cli.setup_cli.get_reference_document_by_source_url")
+    @patch("src.config.get_settings")
+    @patch("src.db.client.get_supabase_client")
     @patch("src.cli.setup_cli._run_test_repl")
     @patch("src.cli.setup_cli.questionary.select")
     @patch("src.cli.setup_cli.typer.confirm")
@@ -617,6 +733,141 @@ class TestSetupCLI:
         mock_run_test_repl.assert_called_once_with(
             "# Doc content", "Professional", "doc-1", "https://example.com"
         )
+
+
+class TestPromptWithValidation:
+    """Test _prompt_with_validation retry loop and exit behavior."""
+
+    @patch("src.cli.setup_cli.typer.echo")
+    @patch("src.cli.setup_cli.typer.prompt")
+    def test_returns_value_when_valid_on_first_try(self, mock_prompt, mock_echo):
+        """Valid input on first try returns immediately."""
+        mock_prompt.return_value = "123456789012345"
+        result = _prompt_with_validation(
+            "Page ID",
+            _validate_page_id,
+            "Invalid",
+        )
+        assert result == "123456789012345"
+        mock_prompt.assert_called_once()
+
+    @patch("src.cli.setup_cli.typer.echo")
+    @patch("src.cli.setup_cli.typer.prompt")
+    def test_retries_on_invalid_then_accepts_valid(self, mock_prompt, mock_echo):
+        """Invalid then valid input returns after retry."""
+        mock_prompt.side_effect = ["bad", "123456789012345"]
+        result = _prompt_with_validation(
+            "Page ID",
+            _validate_page_id,
+            "Invalid Page ID format.",
+        )
+        assert result == "123456789012345"
+        assert mock_prompt.call_count == 2
+        # Error message and attempts remaining should have been echoed
+        echo_calls = [str(call) for call in mock_echo.call_args_list]
+        assert any("Invalid" in call for call in echo_calls)
+        assert any("attempts remaining" in call for call in echo_calls)
+
+    @patch("src.cli.setup_cli.typer.echo")
+    @patch("src.cli.setup_cli.typer.prompt")
+    def test_exits_after_max_attempts(self, mock_prompt, mock_echo):
+        """After max_attempts invalid inputs, raises typer.Exit(1)."""
+        mock_prompt.return_value = "invalid"
+        with pytest.raises(typer.Exit) as exc_info:
+            _prompt_with_validation(
+                "Page ID",
+                _validate_page_id,
+                "Invalid.",
+                max_attempts=3,
+            )
+        assert exc_info.value.exit_code == 1
+        assert mock_prompt.call_count == 3
+        echo_calls = [str(call) for call in mock_echo.call_args_list]
+        assert any("Maximum attempts reached" in call for call in echo_calls)
+
+
+class TestShowFacebookCredentialHelp:
+    """Test _show_facebook_credential_help echoes expected content per type."""
+
+    @patch("src.cli.setup_cli.typer.echo")
+    def test_page_id_help_content(self, mock_echo):
+        """page_id help includes Page ID instructions."""
+        _show_facebook_credential_help("page_id")
+        all_echoed = " ".join(
+            str(c[0][0]) for c in mock_echo.call_args_list if c[0]
+        )
+        assert "How to Find Your Facebook Page ID" in all_echoed
+        assert "developers.facebook.com" in all_echoed
+        assert "Access Tokens" in all_echoed
+
+    @patch("src.cli.setup_cli.typer.echo")
+    def test_access_token_help_content(self, mock_echo):
+        """access_token help includes token instructions."""
+        _show_facebook_credential_help("access_token")
+        all_echoed = " ".join(
+            str(c[0][0]) for c in mock_echo.call_args_list if c[0]
+        )
+        assert "How to Get Page Access Token" in all_echoed
+        assert "EAAA" in all_echoed
+        assert "Generate Token" in all_echoed
+
+    @patch("src.cli.setup_cli.typer.echo")
+    def test_verify_token_help_content(self, mock_echo):
+        """verify_token help includes verify token explanation."""
+        _show_facebook_credential_help("verify_token")
+        all_echoed = " ".join(
+            str(c[0][0]) for c in mock_echo.call_args_list if c[0]
+        )
+        assert "About Verify Token" in all_echoed
+        assert "openssl rand" in all_echoed
+        assert "8-100 characters" in all_echoed
+
+
+class TestPromptWithHelp:
+    """Test _prompt_with_help: '?' triggers help and re-prompts; invalid re-prompts."""
+
+    @patch("src.cli.setup_cli._show_facebook_credential_help")
+    @patch("src.cli.setup_cli.typer.echo")
+    @patch("src.cli.setup_cli.typer.prompt")
+    def test_question_mark_shows_help_and_reprompts(self, mock_prompt, mock_echo, mock_help):
+        """Typing '?' shows help then prompts again until valid."""
+        mock_prompt.side_effect = ["?", "123456789012345"]
+        result = _prompt_with_help(
+            "Page ID",
+            "page_id",
+            validator=_validate_page_id,
+        )
+        assert result == "123456789012345"
+        mock_help.assert_called_once_with("page_id")
+        assert mock_prompt.call_count == 2
+
+    @patch("src.cli.setup_cli.typer.echo")
+    @patch("src.cli.setup_cli.typer.prompt")
+    def test_invalid_input_shows_error_and_reprompts(self, mock_prompt, mock_echo):
+        """Invalid input shows error message and prompts again."""
+        mock_prompt.side_effect = ["short", "verify-token-12"]
+        result = _prompt_with_help(
+            "Verify Token",
+            "verify_token",
+            validator=_validate_verify_token,
+        )
+        assert result == "verify-token-12"
+        assert mock_prompt.call_count == 2
+        echo_calls = [str(call) for call in mock_echo.call_args_list]
+        assert any("Invalid format" in call for call in echo_calls)
+
+    @patch("src.cli.setup_cli.typer.echo")
+    @patch("src.cli.setup_cli.typer.prompt")
+    def test_valid_input_returns_without_help(self, mock_prompt, mock_echo):
+        """Valid input on first try returns without calling help."""
+        mock_prompt.return_value = "123456789012345"
+        result = _prompt_with_help(
+            "Page ID",
+            "page_id",
+            validator=_validate_page_id,
+        )
+        assert result == "123456789012345"
+        mock_prompt.assert_called_once()
 
 
 class TestValidationFunctions:
