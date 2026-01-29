@@ -1,4 +1,0 @@
-# file: /Users/johneakin/PyCharmProjects/facebook-messenger-scrape-bot/src/config.py
-# hypothesis_version: 6.151.2
-
-['.env', 'Current environment', 'Supabase project URL', 'local', 'prod', 'railway', 'utf-8']

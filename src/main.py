@@ -12,6 +12,8 @@ from sentry_sdk.integrations.mcp import MCPIntegration
 from src.api import health, webhook
 from src.config import get_settings
 from src.db.client import get_supabase_client
+from src.logging_config import setup_logfire
+from src.middleware.correlation_id import CorrelationIDMiddleware
 from src.services.copilot_service import CopilotService
 
 
@@ -20,6 +22,9 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown."""
     # Startup
     settings = get_settings()
+    
+    # Initialize Logfire for observability
+    setup_logfire()
     
     # Initialize Sentry if DSN is provided
     if settings.sentry_dsn:
@@ -62,6 +67,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan
 )
+
+# Correlation ID middleware (must be first for request tracing)
+app.add_middleware(CorrelationIDMiddleware)
 
 # CORS middleware (if needed for webhook testing)
 app.add_middleware(

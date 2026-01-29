@@ -903,6 +903,102 @@ repos:
 
 ---
 
+## Operational Issue Documentation
+
+### Updating RUNBOOK.md from Test Failures
+
+When test failures reveal **operational issues** (not code bugs), document them in `RUNBOOK.md` so the operations team can troubleshoot similar issues in production.
+
+**Important Distinction:**
+- **Code bugs:** Fix in the code, document in commit message
+- **Operational issues:** Reveal problems with external services, configuration, deployment, or environment
+- **New debugging procedures:** Document in RUNBOOK.md for future use
+
+**When to Document in RUNBOOK.md:**
+
+1. **Integration test failures from external services:**
+   - Copilot SDK health checks failing intermittently
+   - Facebook API errors (401, 429, connection timeouts)
+   - Supabase connection pool issues or query timeouts
+   - Network connectivity problems affecting dependencies
+
+2. **E2E test failures revealing deployment issues:**
+   - Webhook endpoint not accessible
+   - Environment variables not properly set in deployment
+   - Database migrations not applied
+   - Service initialization order problems
+
+3. **Test debugging that uncovers new troubleshooting procedures:**
+   - New ways to diagnose issues discovered during test debugging
+   - Helpful debug commands that aided investigation
+   - New monitoring or alerting strategies
+
+4. **Performance test results affecting thresholds:**
+   - New latency baselines that should trigger alerts
+   - Capacity limits discovered during testing
+   - Timeout values that need adjustment
+
+**What to Document:**
+
+When updating RUNBOOK.md from test failures:
+
+- **The operational issue:** What problem did the test uncover?
+- **How to reproduce:** Steps to trigger the issue in production-like environment
+- **Diagnosis steps:** Debug commands to identify the issue
+- **Fix procedures:** Steps to resolve
+- **Prevention:** How to detect early or avoid in future
+
+**Example Workflow:**
+
+**Scenario:** Integration test `test_copilot_service_availability` fails intermittently
+
+1. **Identify:** Issue is intermittent Copilot SDK health checks, not code bug
+2. **Diagnose:** Use new debug approach discovered during test debugging:
+   ```bash
+   uv run python -c "from src.services.copilot_service import CopilotService; ..."
+   ```
+3. **Document in RUNBOOK.md:**
+   - Add/update "Issue: Copilot SDK unavailable / fallback to OpenAI"
+   - Add new diagnosis command to "Debug Commands" → "Copilot SDK Debugging"
+   - Update "Alert Thresholds" if new monitoring strategy
+   - Include what test failure revealed and how to detect in production
+
+4. **Commit:**
+   ```bash
+   git add RUNBOOK.md
+   git commit -m "docs: update RUNBOOK.md with Copilot SDK intermittent failure troubleshooting"
+   ```
+
+**Another Example:**
+
+**Scenario:** E2E test `test_webhook_message_flow` fails on Railway deployment due to environment variable
+
+1. **Identify:** Operational issue with deployment configuration
+2. **What was learned:** FACEBOOK_VERIFY_TOKEN missing in Railway environment
+3. **Document in RUNBOOK.md:**
+   - Add to "Quick Reference" → "Environment Variable Checklist"
+   - Add to "Issue: Webhook verification fails" if not already there
+   - Note the specific deployment step needed
+
+4. **Commit:**
+   ```bash
+   git add RUNBOOK.md
+   git commit -m "docs: update RUNBOOK.md with webhook verification environment setup"
+   ```
+
+**Format Guidelines for RUNBOOK.md Updates:**
+
+- Use consistent markdown with existing sections
+- Keep code blocks runnable (all Python with `uv run`)
+- Include actual output examples when helpful
+- Test commands on local dev environment before documenting
+- Reference actual file paths and service names
+- Link to related documentation
+
+**Reference:** See `RUNBOOK.md` for current operational procedures and troubleshooting guide.
+
+---
+
 ## Running Tests
 
 ```bash

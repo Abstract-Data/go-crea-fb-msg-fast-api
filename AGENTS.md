@@ -10,6 +10,8 @@ You are an expert Python software engineer working on this project.
 - PostgreSQL/Supabase for database
 - PydanticAI for AI agent framework
 - GitHub Copilot SDK for LLM operations
+- Pydantic Logfire for observability (structured logging, tracing, monitoring)
+- Sentry for error tracking
 - Pytest + Hypothesis for testing
 - Ruff for linting and formatting
 - Pre-commit hooks for code quality
@@ -20,6 +22,7 @@ You are an expert Python software engineer working on this project.
 - Repository pattern for database operations
 - PydanticAI agent for message handling
 - Copilot SDK with OpenAI fallback
+- Structured logging with Logfire (request tracing, performance monitoring)
 
 **File Structure:**
 ```
@@ -309,7 +312,7 @@ async def get_bot_by_page_id(page_id: str):
 
 ### 🚫 NEVER DO
 - Commit secrets, API keys, or credentials
-- Use `print()` instead of logging
+- Use `print()` instead of logging (use `logfire` for structured logs)
 - Swallow exceptions with bare `except:`
 - Modify code in `site-packages/` or `.venv/`
 - Store passwords in plain text
@@ -317,6 +320,7 @@ async def get_bot_by_page_id(page_id: str):
 - Import from `__init__.py` files you didn't create
 - Hardcode Facebook tokens or Supabase keys
 - Skip error handling for external API calls
+- Log sensitive data without masking (use `mask_pii()` and `redact_tokens()`)
 
 ---
 
@@ -382,3 +386,106 @@ async def scrape_and_synthesize(url: str) -> str:
     
     return reference_doc
 ```
+
+### Structured Logging with Logfire
+```python
+import logfire
+from src.logging_config import mask_pii, redact_tokens
+
+# ✅ GOOD - Structured logging with context
+logfire.info(
+    "Processing agent response",
+    message_length=len(message),
+    confidence=response.confidence,
+    requires_escalation=response.requires_escalation,
+    bot_config_id=context.bot_config_id,
+)
+
+# ✅ GOOD - Error logging with context
+try:
+    result = await some_operation()
+except Exception as e:
+    logfire.error(
+        "Operation failed",
+        error=str(e),
+        operation="some_operation",
+        **redact_tokens({"token": sensitive_token})  # Redact sensitive data
+    )
+    raise
+
+# ✅ GOOD - Timing and performance logging
+with logfire.span("database_query"):
+    result = await db.query(...)
+    logfire.info("Query completed", row_count=len(result))
+
+# ❌ BAD - Using print() or basic logging
+print(f"Processing message: {message}")  # Never use print()
+logging.info(f"Error: {error}")  # Use logfire instead for structured logs
+```
+
+---
+
+## Operational Documentation Maintenance
+
+### Updating RUNBOOK.md
+
+The `RUNBOOK.md` file is the central repository for operational procedures and troubleshooting guides. Keep it current by updating it when discovering new issues, implementing fixes, or establishing new procedures.
+
+**When to Update RUNBOOK.md:**
+- ✅ When discovering a new operational issue or error pattern
+- ✅ When implementing a fix for a documented issue
+- ✅ When adding new debugging procedures or commands
+- ✅ When establishing new alert thresholds or monitoring criteria
+- ✅ When test failures reveal operational problems (see `TESTING.md`)
+- ✅ When service behavior changes (e.g., fallback logic, retry strategies)
+- ✅ When external dependencies change (Copilot SDK, Facebook API, Supabase)
+
+**How to Update RUNBOOK.md:**
+
+1. **Identify the issue or procedure:**
+   - Does it fit in "Common Issues & Fixes"? (operational problems)
+   - Does it fit in "Debug Commands"? (new debugging techniques)
+   - Does it fit in "Service-Specific Troubleshooting"? (service-level issues)
+   - Does it affect "Alert Thresholds"? (monitoring changes)
+
+2. **Add or update the section:**
+   - Use existing format and style
+   - Include clear headings and subsections
+   - Add code blocks for commands with explanations
+   - Reference actual file paths and service names
+
+3. **Include necessary details:**
+   - **Symptoms:** What does the issue look like?
+   - **Diagnosis:** How do you identify and confirm the issue?
+   - **Fix:** What steps resolve the issue?
+   - **Prevention/Monitoring:** How to detect early or prevent?
+
+4. **Reference related files:**
+   - Link to source code files involved
+   - Reference related documentation (GUARDRAILS.md, ARCHITECTURE.md, etc.)
+   - Include actual line numbers if fixing specific code
+
+5. **Test the documentation:**
+   - Verify commands work as documented
+   - Test on local development environment first
+   - Confirm actual file paths and endpoints are correct
+
+**Example:** If you discover Copilot SDK health checks are failing intermittently:
+
+1. Add to "Common Issues & Fixes" → "Issue: Copilot SDK unavailable" section
+2. Document the diagnosis: What makes this different from the current issue?
+3. Document the fix: New steps to resolve
+4. Add debug command to "Debug Commands" → "Copilot SDK Debugging"
+5. Update "Alert Thresholds" if new monitoring is needed
+6. Commit with message: `docs: update RUNBOOK.md with Copilot SDK troubleshooting`
+
+**Format Guidelines:**
+
+- Use consistent markdown formatting
+- Keep code blocks runnable (use `uv run` prefix for Python)
+- Use tables for comparison/threshold data
+- Include shell commands with example output
+- Link to other docs when relevant
+- Keep technical accuracy — this is operational documentation
+
+See `RUNBOOK.md` for the current operational procedures and troubleshooting guide.

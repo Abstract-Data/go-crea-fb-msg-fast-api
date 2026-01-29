@@ -1,8 +1,11 @@
 """Bot configuration and message history repository."""
 
+import time
 from datetime import datetime
 from typing import Optional
 import uuid
+
+import logfire
 
 from src.db.client import get_supabase_client
 from src.models.config_models import BotConfiguration
@@ -24,6 +27,15 @@ def create_reference_document(
     Returns:
         Reference document ID
     """
+    start_time = time.time()
+    
+    logfire.info(
+        "Creating reference document",
+        source_url=source_url,
+        content_length=len(content),
+        content_hash=content_hash,
+    )
+    
     supabase = get_supabase_client()
     
     data = {
@@ -32,12 +44,38 @@ def create_reference_document(
         "content_hash": content_hash
     }
     
-    result = supabase.table("reference_documents").insert(data).execute()
-    
-    if not result.data:
-        raise ValueError("Failed to create reference document")
-    
-    return result.data[0]["id"]
+    try:
+        result = supabase.table("reference_documents").insert(data).execute()
+        elapsed = time.time() - start_time
+        
+        if not result.data:
+            logfire.error(
+                "Failed to create reference document",
+                source_url=source_url,
+                content_hash=content_hash,
+                response_time_ms=elapsed * 1000,
+            )
+            raise ValueError("Failed to create reference document")
+        
+        doc_id = result.data[0]["id"]
+        logfire.info(
+            "Reference document created",
+            document_id=doc_id,
+            source_url=source_url,
+            content_hash=content_hash,
+            response_time_ms=elapsed * 1000,
+        )
+        return doc_id
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logfire.error(
+            "Error creating reference document",
+            source_url=source_url,
+            error=str(e),
+            error_type=type(e).__name__,
+            response_time_ms=elapsed * 1000,
+        )
+        raise
 
 
 def link_reference_document_to_bot(doc_id: str, bot_id: str) -> None:
@@ -107,14 +145,44 @@ def get_bot_configuration_by_page_id(page_id: str) -> Optional[BotConfiguration]
     Returns:
         BotConfiguration if found, None otherwise
     """
+    start_time = time.time()
+    
+    logfire.info(
+        "Fetching bot configuration",
+        page_id=page_id,
+    )
+    
     supabase = get_supabase_client()
     
-    result = supabase.table("bot_configurations").select("*").eq("page_id", page_id).eq("is_active", True).execute()
-    
-    if not result.data:
-        return None
-    
-    return BotConfiguration(**result.data[0])
+    try:
+        result = supabase.table("bot_configurations").select("*").eq("page_id", page_id).eq("is_active", True).execute()
+        elapsed = time.time() - start_time
+        
+        if not result.data:
+            logfire.info(
+                "Bot configuration not found",
+                page_id=page_id,
+                response_time_ms=elapsed * 1000,
+            )
+            return None
+        
+        logfire.info(
+            "Bot configuration fetched",
+            page_id=page_id,
+            bot_id=result.data[0].get("id"),
+            response_time_ms=elapsed * 1000,
+        )
+        return BotConfiguration(**result.data[0])
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logfire.error(
+            "Error fetching bot configuration",
+            page_id=page_id,
+            error=str(e),
+            error_type=type(e).__name__,
+            response_time_ms=elapsed * 1000,
+        )
+        raise
 
 
 def get_reference_document(doc_id: str) -> Optional[dict]:
@@ -143,6 +211,18 @@ def save_message_history(
     requires_escalation: bool = False,
 ) -> None:
     """Save message to history."""
+    start_time = time.time()
+    
+    logfire.info(
+        "Saving message history",
+        bot_id=bot_id,
+        sender_id=sender_id,
+        message_length=len(message_text),
+        response_length=len(response_text),
+        confidence=confidence,
+        requires_escalation=requires_escalation,
+    )
+    
     supabase = get_supabase_client()
     
     data = {
@@ -155,4 +235,25 @@ def save_message_history(
         "created_at": datetime.utcnow().isoformat()
     }
     
-    supabase.table("message_history").insert(data).execute()
+    try:
+        result = supabase.table("message_history").insert(data).execute()
+        elapsed = time.time() - start_time
+        
+        logfire.info(
+            "Message history saved",
+            bot_id=bot_id,
+            sender_id=sender_id,
+            message_id=result.data[0].get("id") if result.data else None,
+            response_time_ms=elapsed * 1000,
+        )
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logfire.error(
+            "Error saving message history",
+            bot_id=bot_id,
+            sender_id=sender_id,
+            error=str(e),
+            error_type=type(e).__name__,
+            response_time_ms=elapsed * 1000,
+        )
+        raise
