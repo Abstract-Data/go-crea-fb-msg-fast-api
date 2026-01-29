@@ -1,8 +1,6 @@
 """End-to-end tests for main application."""
 
-import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
-from fastapi.testclient import TestClient
+from unittest.mock import patch, MagicMock
 
 from src.main import app
 

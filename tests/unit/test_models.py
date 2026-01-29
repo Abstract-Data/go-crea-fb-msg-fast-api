@@ -1,7 +1,6 @@
 """Property-based tests for Pydantic models."""
 
-import pytest
-from hypothesis import given, strategies as st, assume
+from hypothesis import given, strategies as st
 from datetime import datetime
 
 from src.models.messenger import (

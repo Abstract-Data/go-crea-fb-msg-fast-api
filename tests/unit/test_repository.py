@@ -1,19 +1,23 @@
 """Tests for repository functions."""
 
+import time
+
 import pytest
 from unittest.mock import patch, MagicMock
 from datetime import datetime
-import uuid
 
 from src.db.repository import (
+    BotConfigCache,
     create_reference_document,
     link_reference_document_to_bot,
     create_bot_configuration,
+    get_bot_config_cache,
     get_bot_configuration_by_page_id,
     get_reference_document,
     get_reference_document_by_source_url,
     get_user_profile,
     create_user_profile,
+    reset_bot_config_cache,
     update_user_profile,
     upsert_user_profile,
     save_message_history,
@@ -100,7 +104,6 @@ class TestCreateBotConfiguration:
     def test_create_bot_configuration_valid_inputs(self, mock_get_client, mock_link):
         """Test create_bot_configuration() with valid inputs."""
         mock_client = MagicMock()
-        now = datetime.utcnow()
 
         # The mock will return data based on what's inserted
         def mock_insert_execute():
@@ -460,10 +463,17 @@ class TestUserProfileRepository:
 
     @patch("src.db.repository.get_supabase_client")
     def test_upsert_user_profile(self, mock_get_client):
-        """upsert_user_profile upserts on sender_id."""
+        """upsert_user_profile upserts on sender_id and returns full profile dict."""
         mock_client = MagicMock()
         mock_result = MagicMock()
-        mock_result.data = [{"id": "prof-upserted"}]
+        # upsert_user_profile now returns the full profile dict, not just the ID
+        mock_result.data = [{
+            "id": "prof-upserted",
+            "sender_id": "user-1",
+            "page_id": "page-1",
+            "first_name": "Jane",
+            "locale": "en_US",
+        }]
         chain = (
             mock_client.table.return_value.upsert.return_value.execute
         )
@@ -476,8 +486,12 @@ class TestUserProfileRepository:
             first_name="Jane",
             locale="en_US",
         )
-        uid = upsert_user_profile(profile)
-        assert uid == "prof-upserted"
+        result = upsert_user_profile(profile)
+        # Now returns full profile dict, not just ID
+        assert result is not None
+        assert result["id"] == "prof-upserted"
+        assert result["sender_id"] == "user-1"
+        assert result["first_name"] == "Jane"
         mock_client.table.assert_called_with("user_profiles")
         upsert_call = mock_client.table.return_value.upsert.call_args[0][0]
         assert upsert_call["sender_id"] == "user-1"
@@ -586,3 +600,265 @@ class TestSaveTestMessage:
             confidence=0.9,
             requires_escalation=False,
         )
+
+
+# =============================================================================
+# Bot Configuration Cache Tests
+# =============================================================================
+
+
+class TestBotConfigCache:
+    """Test BotConfigCache class."""
+
+    def test_cache_set_and_get(self):
+        """Cache should store and retrieve configurations."""
+        cache = BotConfigCache(ttl_seconds=60)
+
+        config = BotConfiguration(
+            id="bot-123",
+            page_id="page-123",
+            website_url="https://example.com",
+            reference_doc_id="doc-123",
+            tone="friendly",
+            facebook_page_access_token="token",
+            facebook_verify_token="verify",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+            is_active=True,
+        )
+
+        cache.set("page-123", config)
+
+        retrieved = cache.get("page-123")
+        assert retrieved is not None
+        assert retrieved.id == "bot-123"
+        assert retrieved.page_id == "page-123"
+
+    def test_cache_miss_returns_none(self):
+        """Cache should return None for missing entries."""
+        cache = BotConfigCache(ttl_seconds=60)
+
+        result = cache.get("nonexistent-page")
+        assert result is None
+
+    def test_cache_expiration(self):
+        """Cache entries should expire after TTL."""
+        # Use very short TTL for testing
+        cache = BotConfigCache(ttl_seconds=0)  # Immediately expire
+
+        config = BotConfiguration(
+            id="bot-123",
+            page_id="page-123",
+            website_url="https://example.com",
+            reference_doc_id="doc-123",
+            tone="friendly",
+            facebook_page_access_token="token",
+            facebook_verify_token="verify",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+            is_active=True,
+        )
+
+        cache.set("page-123", config)
+        # Small delay to ensure expiration
+        time.sleep(0.01)
+
+        result = cache.get("page-123")
+        assert result is None
+
+    def test_cache_invalidate(self):
+        """Cache should remove entries on invalidate."""
+        cache = BotConfigCache(ttl_seconds=60)
+
+        config = BotConfiguration(
+            id="bot-123",
+            page_id="page-123",
+            website_url="https://example.com",
+            reference_doc_id="doc-123",
+            tone="friendly",
+            facebook_page_access_token="token",
+            facebook_verify_token="verify",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+            is_active=True,
+        )
+
+        cache.set("page-123", config)
+        assert cache.get("page-123") is not None
+
+        cache.invalidate("page-123")
+        assert cache.get("page-123") is None
+
+    def test_cache_invalidate_nonexistent_is_noop(self):
+        """Invalidating nonexistent entry should not raise."""
+        cache = BotConfigCache(ttl_seconds=60)
+        # Should not raise
+        cache.invalidate("nonexistent-page")
+
+    def test_cache_clear(self):
+        """Cache clear should remove all entries."""
+        cache = BotConfigCache(ttl_seconds=60)
+
+        for i in range(3):
+            config = BotConfiguration(
+                id=f"bot-{i}",
+                page_id=f"page-{i}",
+                website_url="https://example.com",
+                reference_doc_id=f"doc-{i}",
+                tone="friendly",
+                facebook_page_access_token="token",
+                facebook_verify_token="verify",
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+                is_active=True,
+            )
+            cache.set(f"page-{i}", config)
+
+        assert cache.size == 3
+
+        cache.clear()
+        assert cache.size == 0
+        assert cache.get("page-0") is None
+
+    def test_cache_size_property(self):
+        """Size property should return number of entries."""
+        cache = BotConfigCache(ttl_seconds=60)
+        assert cache.size == 0
+
+        config = BotConfiguration(
+            id="bot-123",
+            page_id="page-123",
+            website_url="https://example.com",
+            reference_doc_id="doc-123",
+            tone="friendly",
+            facebook_page_access_token="token",
+            facebook_verify_token="verify",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+            is_active=True,
+        )
+
+        cache.set("page-123", config)
+        assert cache.size == 1
+
+
+class TestBotConfigCacheIntegration:
+    """Test cache integration with repository functions."""
+
+    def setup_method(self):
+        """Reset cache before each test."""
+        reset_bot_config_cache()
+
+    def teardown_method(self):
+        """Clean up cache after each test."""
+        reset_bot_config_cache()
+
+    @patch("src.db.repository.get_supabase_client")
+    def test_get_bot_config_caches_result(self, mock_get_client):
+        """First call should hit DB, second should use cache."""
+        mock_client = MagicMock()
+        mock_result = MagicMock()
+        mock_result.data = [{
+            "id": "bot-123",
+            "page_id": "page-123",
+            "website_url": "https://example.com",
+            "reference_doc_id": "doc-123",
+            "tone": "friendly",
+            "facebook_page_access_token": "token",
+            "facebook_verify_token": "verify",
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+            "is_active": True,
+        }]
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = mock_result
+        mock_get_client.return_value = mock_client
+
+        # First call - should hit DB
+        result1 = get_bot_configuration_by_page_id("page-123")
+        assert result1 is not None
+        assert result1.id == "bot-123"
+
+        # Second call - should use cache (DB not called again)
+        mock_client.reset_mock()
+        result2 = get_bot_configuration_by_page_id("page-123")
+        assert result2 is not None
+        assert result2.id == "bot-123"
+
+        # Verify DB was not called on second request
+        mock_client.table.assert_not_called()
+
+    @patch("src.db.repository.get_supabase_client")
+    def test_get_bot_config_not_found_not_cached(self, mock_get_client):
+        """Not-found results should not be cached."""
+        mock_client = MagicMock()
+        mock_result = MagicMock()
+        mock_result.data = []
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = mock_result
+        mock_get_client.return_value = mock_client
+
+        # First call - returns None
+        result1 = get_bot_configuration_by_page_id("nonexistent-page")
+        assert result1 is None
+
+        # Second call - should still hit DB (None not cached)
+        result2 = get_bot_configuration_by_page_id("nonexistent-page")
+        assert result2 is None
+
+        # Verify DB was called twice
+        assert mock_client.table.call_count == 2
+
+    @patch("src.db.repository.get_supabase_client")
+    @patch("src.db.repository.link_reference_document_to_bot")
+    def test_create_bot_config_invalidates_cache(
+        self, mock_link, mock_get_client
+    ):
+        """Creating a bot config should invalidate cache for that page_id."""
+        mock_client = MagicMock()
+        mock_result = MagicMock()
+        mock_result.data = [{
+            "id": "bot-new",
+            "page_id": "page-123",
+            "website_url": "https://example.com",
+            "reference_doc_id": "doc-123",
+            "tone": "friendly",
+            "facebook_page_access_token": "token",
+            "facebook_verify_token": "verify",
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+            "is_active": True,
+        }]
+        mock_client.table.return_value.insert.return_value.execute.return_value = mock_result
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = mock_result
+        mock_get_client.return_value = mock_client
+
+        # Pre-populate cache
+        cache = get_bot_config_cache()
+        old_config = BotConfiguration(
+            id="bot-old",
+            page_id="page-123",
+            website_url="https://old.com",
+            reference_doc_id="doc-old",
+            tone="professional",
+            facebook_page_access_token="old-token",
+            facebook_verify_token="old-verify",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+            is_active=True,
+        )
+        cache.set("page-123", old_config)
+
+        # Create new config (should invalidate cache)
+        from src.models.config_models import BotConfigurationCreate
+
+        new_config = BotConfigurationCreate(
+            page_id="page-123",
+            website_url="https://example.com",
+            reference_doc_id="doc-123",
+            tone="friendly",
+            facebook_page_access_token="token",
+            facebook_verify_token="verify",
+        )
+        create_bot_configuration(config=new_config)
+
+        # Cache should be invalidated
+        assert cache.get("page-123") is None

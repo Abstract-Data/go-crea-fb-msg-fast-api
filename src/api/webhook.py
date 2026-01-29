@@ -1,7 +1,19 @@
-"""Facebook webhook endpoints."""
+"""Facebook webhook endpoints.
+
+This module handles incoming Facebook Messenger webhooks with multiple
+security layers and dependency injection support for testability.
+
+Security layers (in order):
+1. Rate limiting - prevents abuse from single users
+2. Input validation - ensures message meets basic requirements
+3. Prompt injection detection - blocks malicious manipulation attempts
+4. Input sanitization - cleans input for safe processing
+
+The webhook handlers focus on HTTP concerns and security validation,
+delegating business logic to the MessageProcessor service.
+"""
 
 import logging
-import random
 
 from fastapi import APIRouter, BackgroundTasks, Request, Response
 from fastapi.responses import PlainTextResponse
@@ -9,16 +21,23 @@ from fastapi.responses import PlainTextResponse
 from src.config import get_settings
 from src.db.repository import (
     get_bot_configuration_by_page_id,
-    get_reference_document,
-    get_user_profile,
-    save_message_history,
     update_user_profile,
-    upsert_user_profile,
 )
-from src.models.agent_models import AgentContext
-from src.models.user_models import UserProfileCreate, UserProfileUpdate
-from src.services.agent_service import MessengerAgentService
-from src.services.facebook_service import get_user_info, send_message
+from src.middleware.rate_limiter import RateLimiter, get_rate_limiter
+from src.models.user_models import UserProfileUpdate
+from src.services.facebook_service import send_message
+from src.services.input_sanitizer import (
+    get_user_friendly_error,
+    sanitize_user_input,
+    validate_message,
+)
+from src.services.message_processor import (
+    BotConfigNotFoundError,
+    MessageProcessor,
+    ReferenceDocNotFoundError,
+    get_message_processor,
+)
+from src.services.prompt_guard import PromptInjectionDetector, get_prompt_guard
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -82,86 +101,112 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
     return {"status": "ok"}
 
 
-async def process_message(page_id: str, sender_id: str, message_text: str):
-    """Process incoming message and send response."""
+async def process_message(
+    page_id: str,
+    sender_id: str,
+    message_text: str,
+    *,
+    processor: MessageProcessor | None = None,
+    rate_limiter: RateLimiter | None = None,
+    prompt_guard: PromptInjectionDetector | None = None,
+):
+    """Process incoming message and send response.
+
+    This function handles security validation and delegates business logic
+    to the MessageProcessor service. Supports dependency injection for testing.
+
+    Args:
+        page_id: Facebook Page ID that received the message
+        sender_id: Facebook user ID (PSID) who sent the message
+        message_text: The message text content
+        processor: Optional injected message processor (for testing)
+        rate_limiter: Optional injected rate limiter (for testing)
+        prompt_guard: Optional injected prompt guard (for testing)
+
+    Security checks performed in order:
+        1. Rate limiting - prevents abuse from single users
+        2. Input validation - ensures message meets basic requirements
+        3. Prompt injection detection - blocks malicious manipulation attempts
+        4. Input sanitization - cleans input for safe processing
+    """
     try:
-        bot_config = get_bot_configuration_by_page_id(page_id)
-        if not bot_config:
-            logger.error("No bot configuration found for page_id: %s", page_id)
-            return
-
-        user_profile = get_user_profile(sender_id, page_id)
-        if not user_profile:
-            logger.info("New user %s, fetching profile from Facebook", sender_id)
-            fb_user_info = await get_user_info(
-                page_access_token=bot_config.facebook_page_access_token,
-                user_id=sender_id,
-            )
-            if fb_user_info:
-                new_profile = UserProfileCreate(
-                    sender_id=sender_id,
-                    page_id=page_id,
-                    first_name=fb_user_info.first_name,
-                    last_name=fb_user_info.last_name,
-                    profile_pic=fb_user_info.profile_pic,
-                    locale=fb_user_info.locale,
-                    timezone=fb_user_info.timezone,
+        # ======================================================================
+        # Security Layer 1: Rate Limiting
+        # ======================================================================
+        _rate_limiter = rate_limiter or get_rate_limiter()
+        if not _rate_limiter.check_rate_limit(sender_id):
+            logger.warning("Rate limit exceeded for user %s", sender_id)
+            # Optionally send a polite rate limit message
+            bot_config = get_bot_configuration_by_page_id(page_id)
+            if bot_config:
+                await send_message(
+                    page_access_token=bot_config.facebook_page_access_token,
+                    recipient_id=sender_id,
+                    text="You're sending messages too quickly. Please wait a moment before sending another message.",
                 )
-                upsert_user_profile(new_profile)
-                user_profile = get_user_profile(sender_id, page_id)
-
-        ref_doc = get_reference_document(bot_config.reference_doc_id)
-        if not ref_doc:
-            logger.error("No reference document found: %s", bot_config.reference_doc_id)
             return
 
-        recent_messages: list[str] = []
-        user_name = user_profile.get("first_name") if user_profile else None
-        user_location = user_profile.get("location_title") if user_profile else None
+        # ======================================================================
+        # Security Layer 2: Input Validation
+        # ======================================================================
+        validation_result = validate_message(message_text)
+        if not validation_result.is_valid:
+            logger.warning(
+                "Invalid message from %s: %s",
+                sender_id,
+                validation_result.error_code,
+            )
+            # Send user-friendly error if appropriate
+            error_msg = get_user_friendly_error(validation_result.error_code)
+            if error_msg:
+                bot_config = get_bot_configuration_by_page_id(page_id)
+                if bot_config:
+                    await send_message(
+                        page_access_token=bot_config.facebook_page_access_token,
+                        recipient_id=sender_id,
+                        text=error_msg,
+                    )
+            return
 
-        context = AgentContext(
-            bot_config_id=bot_config.id,
-            reference_doc_id=bot_config.reference_doc_id,
-            reference_doc=ref_doc["content"],
-            tone=bot_config.tone,
-            recent_messages=recent_messages,
-            tenant_id=getattr(bot_config, "tenant_id", None),
-            user_name=user_name,
-            user_location=user_location,
-        )
+        # ======================================================================
+        # Security Layer 3: Prompt Injection Detection
+        # ======================================================================
+        _prompt_guard = prompt_guard or get_prompt_guard()
+        injection_result = _prompt_guard.check(message_text)
 
-        agent_service = MessengerAgentService()
-        response = await agent_service.respond(context, message_text)
+        if injection_result.is_suspicious and injection_result.risk_level == "high":
+            logger.warning(
+                "Blocked high-risk prompt injection from %s: %s",
+                sender_id,
+                injection_result.matched_pattern,
+            )
+            # Don't process, but don't reveal why to avoid helping attackers
+            return
 
-        response_text = response.message
-        if user_name and response.confidence > 0.8:
-            if not response_text.startswith(user_name) and random.random() < 0.2:
-                response_text = f"Hi {user_name}! {response_text}"
+        # Log medium-risk patterns but allow processing
+        if injection_result.is_suspicious and injection_result.risk_level == "medium":
+            logger.info(
+                "Medium-risk pattern detected from %s: %s (proceeding)",
+                sender_id,
+                injection_result.matched_pattern,
+            )
 
-        await send_message(
-            page_access_token=bot_config.facebook_page_access_token,
-            recipient_id=sender_id,
-            text=response_text,
-        )
+        # ======================================================================
+        # Security Layer 4: Input Sanitization
+        # ======================================================================
+        sanitized_message = sanitize_user_input(message_text)
 
-        save_message_history(
-            bot_id=bot_config.id,
-            sender_id=sender_id,
-            message_text=message_text,
-            response_text=response_text,
-            confidence=response.confidence,
-            requires_escalation=response.requires_escalation,
-            user_profile_id=user_profile["id"] if user_profile else None,
-        )
+        # ======================================================================
+        # Main Processing - Delegate to MessageProcessor
+        # ======================================================================
+        _processor = processor or get_message_processor()
 
-        logger.info(
-            "Processed message for page %s: user_name=%s, location=%s, confidence=%s, escalation=%s",
-            page_id,
-            user_name or "unknown",
-            user_location or "unknown",
-            response.confidence,
-            response.requires_escalation,
-        )
+        try:
+            await _processor.process(page_id, sender_id, sanitized_message)
+        except BotConfigNotFoundError:
+            logger.error("No bot configuration found for page_id: %s", page_id)
+        except ReferenceDocNotFoundError as e:
+            logger.error("Reference document not found: %s", e)
 
     except Exception as e:
         logger.error("Error processing message: %s", e, exc_info=True)

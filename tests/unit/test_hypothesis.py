@@ -1,6 +1,5 @@
 """Additional property-based tests with Hypothesis."""
 
-import pytest
 from hypothesis import given, strategies as st, assume, settings, HealthCheck
 import re
 
@@ -226,7 +225,6 @@ class TestDataTransformationProperties:
     @given(text=st.text(min_size=0, max_size=1000))
     def test_whitespace_normalization_property(self, text: str):
         """Property: Whitespace normalization should preserve content."""
-        import re
 
         normalized = re.sub(r"\s+", " ", text).strip()
 

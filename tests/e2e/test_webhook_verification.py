@@ -1,10 +1,7 @@
 """End-to-end tests for webhook verification."""
 
-import pytest
 from unittest.mock import patch
 
-from src.main import app
-from fastapi.testclient import TestClient
 
 
 class TestWebhookVerification:

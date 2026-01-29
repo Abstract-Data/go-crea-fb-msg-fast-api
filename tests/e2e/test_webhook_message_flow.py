@@ -1,10 +1,7 @@
 """End-to-end tests for webhook message processing flow."""
 
-import pytest
 from unittest.mock import patch
 
-from src.main import app
-from fastapi.testclient import TestClient
 
 
 class TestWebhookMessageFlow:

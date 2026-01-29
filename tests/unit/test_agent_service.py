@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from src.models.agent_models import AgentContext, AgentResponse
-from src.services.agent_service import MessengerAgentService, MessengerAgentDeps
+from src.services.agent_service import MessengerAgentService
 
 
 class TestMessengerAgentService:

@@ -1,8 +1,7 @@
 """Tests for website scraping service."""
 
 import pytest
-from hypothesis import given, strategies as st, settings, HealthCheck
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 import httpx
 import respx as respx_lib
 
@@ -11,12 +10,18 @@ from src.services.scraper import chunk_text, scrape_website
 
 
 @pytest.fixture(autouse=True)
-def mock_browser_fetch():
+def mock_browser_fetch(mock_settings):
     """Mock _fetch_with_browser_sync so 'first page little text' refetch does not launch Chrome.
     Returns the same URL content via sync httpx so respx mocks are used and test assertions pass.
+
+    Note: Depends on mock_settings to ensure get_settings() returns valid test config
+    since scraper functions now use configurable timeouts from settings.
     """
 
-    def _fake_browser_fetch(url: str, timeout_seconds: float = 30.0) -> str:
+    def _fake_browser_fetch(url: str, timeout_seconds: float | None = None) -> str:
+        # Use a sensible default if None passed (mirrors production behavior)
+        if timeout_seconds is None:
+            timeout_seconds = 30.0
         with httpx.Client(timeout=timeout_seconds, follow_redirects=True) as client:
             response = client.get(url)
             response.raise_for_status()
