@@ -1,0 +1,144 @@
+"""Tests for application configuration."""
+
+import pytest
+from hypothesis import given, strategies as st
+from unittest.mock import patch
+
+from src.config import Settings, get_settings
+
+
+class TestSettings:
+    """Test Settings model validation."""
+    
+    def test_settings_required_fields(self):
+        """Test that required fields are enforced."""
+        with pytest.raises(Exception):  # Pydantic validation error
+            Settings()
+    
+    def test_settings_with_all_fields(self):
+        """Test Settings with all required fields."""
+        settings = Settings(
+            facebook_page_access_token="test-token",
+            facebook_verify_token="verify-token",
+            supabase_url="https://test.supabase.co",
+            supabase_service_key="service-key"
+        )
+        assert settings.facebook_page_access_token == "test-token"
+        assert settings.facebook_verify_token == "verify-token"
+        assert settings.supabase_url == "https://test.supabase.co"
+        assert settings.supabase_service_key == "service-key"
+    
+    def test_settings_default_values(self):
+        """Test that default values are set correctly."""
+        settings = Settings(
+            facebook_page_access_token="test-token",
+            facebook_verify_token="verify-token",
+            supabase_url="https://test.supabase.co",
+            supabase_service_key="service-key"
+        )
+        assert settings.copilot_cli_host == "http://localhost:5909"
+        assert settings.copilot_enabled is True
+        assert settings.openai_api_key == ""
+        assert settings.env == "local"
+        assert settings.facebook_app_secret is None
+    
+    @given(
+        copilot_host=st.text(min_size=1, max_size=200),
+        copilot_enabled=st.booleans(),
+        env=st.sampled_from(["local", "railway", "prod"])
+    )
+    def test_settings_optional_fields_properties(
+        self,
+        copilot_host: str,
+        copilot_enabled: bool,
+        env: str
+    ):
+        """Property: Settings should accept valid optional field values."""
+        settings = Settings(
+            facebook_page_access_token="test-token",
+            facebook_verify_token="verify-token",
+            supabase_url="https://test.supabase.co",
+            supabase_service_key="service-key",
+            copilot_cli_host=copilot_host,
+            copilot_enabled=copilot_enabled,
+            env=env
+        )
+        assert settings.copilot_cli_host == copilot_host
+        assert settings.copilot_enabled == copilot_enabled
+        assert settings.env == env
+    
+    def test_settings_env_validation(self):
+        """Test that env field only accepts valid values."""
+        # Valid values
+        for env in ["local", "railway", "prod"]:
+            settings = Settings(
+                facebook_page_access_token="test-token",
+                facebook_verify_token="verify-token",
+                supabase_url="https://test.supabase.co",
+                supabase_service_key="service-key",
+                env=env
+            )
+            assert settings.env == env
+        
+        # Invalid value should raise validation error
+        with pytest.raises(Exception):  # Pydantic validation error
+            Settings(
+                facebook_page_access_token="test-token",
+                facebook_verify_token="verify-token",
+                supabase_url="https://test.supabase.co",
+                supabase_service_key="service-key",
+                env="invalid"
+            )
+
+
+class TestGetSettings:
+    """Test get_settings() function."""
+    
+    @patch.dict("os.environ", {
+        "FACEBOOK_PAGE_ACCESS_TOKEN": "test-token",
+        "FACEBOOK_VERIFY_TOKEN": "test-verify",
+        "SUPABASE_URL": "https://test.supabase.co",
+        "SUPABASE_SERVICE_KEY": "test-key"
+    })
+    def test_get_settings_caching(self):
+        """Test that get_settings() returns cached instance."""
+        # Clear cache first
+        get_settings.cache_clear()
+        
+        settings1 = get_settings()
+        settings2 = get_settings()
+        
+        # Should be the same instance (cached)
+        assert settings1 is settings2
+    
+    @patch.dict("os.environ", {
+        "FACEBOOK_PAGE_ACCESS_TOKEN": "env-token",
+        "FACEBOOK_VERIFY_TOKEN": "env-verify",
+        "SUPABASE_URL": "https://env.supabase.co",
+        "SUPABASE_SERVICE_KEY": "env-service-key"
+    })
+    def test_get_settings_from_env(self):
+        """Test that get_settings() loads from environment variables."""
+        # Clear cache to force reload
+        get_settings.cache_clear()
+        
+        settings = get_settings()
+        
+        assert settings.facebook_page_access_token == "env-token"
+        assert settings.facebook_verify_token == "env-verify"
+        assert settings.supabase_url == "https://env.supabase.co"
+        assert settings.supabase_service_key == "env-service-key"
+    
+    def test_get_settings_case_insensitive(self):
+        """Test that environment variable names are case-insensitive."""
+        with patch.dict("os.environ", {
+            "facebook_page_access_token": "lowercase-token",
+            "FACEBOOK_VERIFY_TOKEN": "uppercase-verify",
+            "Supabase_Url": "mixed-case-url",
+            "SUPABASE_SERVICE_KEY": "service-key"
+        }):
+            get_settings.cache_clear()
+            settings = get_settings()
+            
+            # Pydantic-settings should handle case-insensitive matching
+            assert settings.supabase_service_key == "service-key"

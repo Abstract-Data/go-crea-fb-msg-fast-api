@@ -3,8 +3,11 @@
 import os
 from contextlib import asynccontextmanager
 
+import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.mcp import MCPIntegration
 
 from src.api import health, webhook
 from src.config import get_settings
@@ -17,6 +20,18 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown."""
     # Startup
     settings = get_settings()
+    
+    # Initialize Sentry if DSN is provided
+    if settings.sentry_dsn:
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn,
+            traces_sample_rate=settings.sentry_traces_sample_rate,
+            send_default_pii=True,
+            integrations=[
+                FastApiIntegration(),
+                MCPIntegration(),
+            ],
+        )
     
     # Initialize Supabase client
     supabase = get_supabase_client()

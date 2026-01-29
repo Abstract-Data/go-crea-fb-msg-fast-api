@@ -1,0 +1,4 @@
+# file: /Users/johneakin/PyCharmProjects/facebook-messenger-scrape-bot/src/services/scraper.py
+# hypothesis_version: 6.151.2
+
+[30.0, 650, '\\s+', 'footer', 'html.parser', 'nav', 'script', 'style']

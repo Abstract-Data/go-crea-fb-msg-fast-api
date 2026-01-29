@@ -14,6 +14,67 @@ from src.config import get_settings
 app = typer.Typer()
 
 
+def _run_async_with_cleanup(coro):
+    """
+    Run async coroutine with proper cleanup of event loop and resources.
+    
+    Ensures all pending tasks are cancelled and the event loop is properly closed
+    even when exceptions occur, preventing resource warnings.
+    """
+    loop = None
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        # Handle both coroutines and regular values (for testing with mocks)
+        if asyncio.iscoroutine(coro):
+            result = loop.run_until_complete(coro)
+        else:
+            # If it's not a coroutine (e.g., from a mock), return it directly
+            result = coro
+        return result
+    finally:
+        if loop is not None:
+            try:
+                # Cancel all pending tasks that aren't done
+                try:
+                    if not loop.is_closed():
+                        pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
+                        for task in pending:
+                            task.cancel()
+                        # Wait for cancellation to complete, ignoring exceptions
+                        if pending:
+                            try:
+                                loop.run_until_complete(
+                                    asyncio.gather(*pending, return_exceptions=True)
+                                )
+                            except RuntimeError:
+                                # Loop might be in a bad state, continue with cleanup
+                                pass
+                        # Shutdown async generators to close any open resources (sockets, etc.)
+                        try:
+                            loop.run_until_complete(loop.shutdown_asyncgens())
+                        except RuntimeError:
+                            # Loop might be in a bad state, continue with cleanup
+                            pass
+                except RuntimeError:
+                    # Loop might be closing or in bad state, continue with cleanup
+                    pass
+            finally:
+                # Always close the loop and clear the event loop
+                try:
+                    if not loop.is_closed():
+                        loop.close()
+                except Exception:
+                    # Ignore errors during loop closure
+                    pass
+                finally:
+                    try:
+                        asyncio.set_event_loop(None)
+                    except Exception:
+                        # Ignore errors when clearing event loop
+                        pass
+
+
 @app.command()
 def setup():
     """
@@ -36,7 +97,7 @@ def setup():
     
     typer.echo(f"Scraping {website_url}...")
     try:
-        text_chunks = asyncio.run(scrape_website(website_url))
+        text_chunks = _run_async_with_cleanup(scrape_website(website_url))
         typer.echo(f"✓ Scraped {len(text_chunks)} text chunks")
     except Exception as e:
         typer.echo(f"✗ Error scraping website: {e}", err=True)
@@ -45,9 +106,9 @@ def setup():
     # Step 2: Build reference doc
     typer.echo("Generating reference document via Copilot...")
     try:
-        markdown_content, content_hash = asyncio.run(build_reference_doc(
-            copilot, website_url, text_chunks
-        ))
+        markdown_content, content_hash = _run_async_with_cleanup(
+            build_reference_doc(copilot, website_url, text_chunks)
+        )
         typer.echo("✓ Reference document generated")
     except Exception as e:
         typer.echo(f"✗ Error generating reference doc: {e}", err=True)
