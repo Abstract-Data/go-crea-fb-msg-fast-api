@@ -13,6 +13,12 @@ load_dotenv(_project_root / ".env")
 load_dotenv(_project_root / ".env.local")
 
 import asyncio
+import hashlib
+import re
+import time
+from datetime import datetime
+from typing import Callable
+
 import questionary
 import typer
 
@@ -44,6 +50,142 @@ def _normalize_website_url(url: str) -> str:
         return url
     u = url.strip()
     return u.rstrip("/") if u != "https://" and u != "http://" else u
+
+
+def _validate_page_id(page_id: str) -> bool:
+    """Validate Facebook Page ID format."""
+    return bool(re.match(r"^\d{15,17}$", page_id.strip()))
+
+
+def _validate_page_access_token(token: str) -> bool:
+    """Validate Page Access Token format."""
+    token = token.strip()
+    return token.startswith("EAAA") and len(token) > 100
+
+
+def _validate_verify_token(token: str) -> bool:
+    """Validate verify token format."""
+    token = token.strip()
+    return bool(re.match(r"^[a-zA-Z0-9_-]{8,100}$", token))
+
+
+def _prompt_with_validation(
+    message: str,
+    validator: Callable[[str], bool],
+    error_message: str,
+    hide_input: bool = False,
+    max_attempts: int = 3,
+) -> str:
+    """Prompt user with input validation."""
+    for attempt in range(max_attempts):
+        value = typer.prompt(message, hide_input=hide_input).strip()
+        if validator(value):
+            return value
+        typer.echo(
+            typer.style(f"❌ {error_message}", fg=typer.colors.RED),
+            err=True,
+        )
+        if attempt < max_attempts - 1:
+            typer.echo(f"  {max_attempts - attempt - 1} attempts remaining\n")
+        else:
+            typer.echo("❌ Maximum attempts reached. Exiting.")
+            raise typer.Exit(1)
+    return value  # unreachable but satisfies type checker
+
+
+def _show_facebook_credential_help(credential_type: str) -> None:
+    """Show detailed help for getting specific Facebook credentials."""
+    if credential_type == "page_id":
+        typer.echo("─" * 60)
+        typer.echo("🎯 How to Find Your Facebook Page ID")
+        typer.echo("─" * 60)
+        typer.echo("")
+        typer.echo("Method 1: From Messenger Settings (Easiest)")
+        typer.echo("  1. Go to: https://developers.facebook.com/apps")
+        typer.echo("  2. Select your app → Messenger → Settings")
+        typer.echo("  3. Look at Access Tokens → Page dropdown")
+        typer.echo("  4. Page ID is in parentheses: 'Page Name (123456789012345)'")
+        typer.echo("")
+        typer.echo("Method 2: From Your Page")
+        typer.echo("  1. Go to your Facebook Page")
+        typer.echo("  2. Click 'About' → 'Page Transparency'")
+        typer.echo("  3. Look for 'Page ID' field")
+        typer.echo("")
+        typer.echo("─" * 60)
+    elif credential_type == "access_token":
+        typer.echo("─" * 60)
+        typer.echo("🔑 How to Get Page Access Token")
+        typer.echo("─" * 60)
+        typer.echo("")
+        typer.echo("Step-by-Step:")
+        typer.echo("  1. Go to: https://developers.facebook.com/apps")
+        typer.echo("  2. Select your app (or create one)")
+        typer.echo("  3. Add Messenger product (if not added)")
+        typer.echo("  4. Go to Messenger → Settings")
+        typer.echo("  5. Find 'Access Tokens' section")
+        typer.echo("  6. Click 'Add or Remove Pages'")
+        typer.echo("  7. Select your page and grant permissions")
+        typer.echo("  8. Click 'Generate Token'")
+        typer.echo("  9. Copy the token immediately! (Won't show again)")
+        typer.echo("")
+        typer.echo("⚠️  Token starts with 'EAAA' and is very long (100+ chars)")
+        typer.echo("")
+        typer.echo("─" * 60)
+    elif credential_type == "verify_token":
+        typer.echo("─" * 60)
+        typer.echo("✅ About Verify Token")
+        typer.echo("─" * 60)
+        typer.echo("")
+        typer.echo("What is it?")
+        typer.echo("  A secret string YOU create to secure your webhook.")
+        typer.echo("  Facebook sends it back during verification.")
+        typer.echo("")
+        typer.echo("How to create:")
+        typer.echo("  Option 1: Use the default we generate for you")
+        typer.echo("  Option 2: Type your own (e.g., 'my-bot-token-2024')")
+        typer.echo("  Option 3: Generate random in terminal:")
+        typer.echo("            openssl rand -base64 32")
+        typer.echo("")
+        typer.echo("Rules:")
+        typer.echo("  • Letters, numbers, dashes, underscores only")
+        typer.echo("  • 8-100 characters")
+        typer.echo("  • No spaces or special chars (@#$%)")
+        typer.echo("  • SAVE IT - you'll need it for webhook setup!")
+        typer.echo("")
+        typer.echo("─" * 60)
+
+
+def _prompt_with_help(
+    message: str,
+    credential_type: str,
+    validator: Callable[[str], bool] | None = None,
+    **prompt_kwargs: object,
+) -> str:
+    """Prompt with optional help dialog (type '?' for detailed help)."""
+    if credential_type == "page_id":
+        typer.echo("💡 Tip: Page ID is a 15-digit number")
+    elif credential_type == "access_token":
+        typer.echo("💡 Tip: Token starts with EAAA and is very long")
+    elif credential_type == "verify_token":
+        typer.echo("💡 Tip: Create any secure string (or use default)")
+    typer.echo("   Type '?' for detailed help on where to find this\n")
+
+    while True:
+        value = typer.prompt(message, **prompt_kwargs).strip()
+        if value == "?":
+            _show_facebook_credential_help(credential_type)
+            typer.echo("")
+            continue
+        if validator and not validator(value):
+            typer.echo(
+                typer.style(
+                    "❌ Invalid format. Try again or type '?' for help",
+                    fg=typer.colors.RED,
+                ),
+                err=True,
+            )
+            continue
+        return value
 
 
 @app.callback(invoke_without_command=True)
@@ -222,7 +364,6 @@ def setup():
 
     Only website URL and Facebook credential fields use copy/paste; tone and menus use arrow keys.
     """
-    import hashlib
 
     # Step 1: Website URL (copy/paste)
     website_url = typer.prompt("What website should the bot be based on?")
@@ -289,12 +430,60 @@ def setup():
 
     # Step 4: Tone (arrow-key) then Facebook config (copy/paste)
     tone = _select_tone("Select a tone for your bot")
-    page_id = typer.prompt("Facebook Page ID")
-    page_access_token = typer.prompt("Facebook Page Access Token")
-    verify_token = typer.prompt(
-        "Verify Token (for webhook)",
-        default=typer.style("random-token-123", fg=typer.colors.YELLOW),
+
+    # Show Facebook setup instructions
+    typer.echo("\n" + "=" * 60)
+    typer.echo("📝 Facebook Credentials Needed")
+    typer.echo("=" * 60)
+    typer.echo("")
+    typer.echo("📖 Need help? See: docs/FACEBOOK_SETUP_QUICK.md")
+    typer.echo("")
+    typer.echo("📌 Quick Reference:")
+    typer.echo("  1. Page ID: Find in Messenger Settings → Access Tokens dropdown")
+    typer.echo("     Format: 123456789012345 (15 digits)")
+    typer.echo("")
+    typer.echo("  2. Page Access Token: Messenger Settings → Generate Token")
+    typer.echo("     Format: EAAA... (very long)")
+    typer.echo("")
+    typer.echo("  3. Verify Token: Any string you create (save it!)")
+    typer.echo("     Tip: Use 'openssl rand -base64 32' to generate")
+    typer.echo("")
+    typer.echo("=" * 60)
+    typer.echo("")
+
+    default_verify_token = "fb-verify-" + hashlib.md5(
+        str(time.time()).encode()
+    ).hexdigest()[:12]
+
+    page_id = _prompt_with_help(
+        "🎯 Facebook Page ID (15-digit number)",
+        "page_id",
+        validator=_validate_page_id,
     )
+    page_access_token = _prompt_with_help(
+        "🔑 Page Access Token (starts with EAAA...)",
+        "access_token",
+        validator=_validate_page_access_token,
+        hide_input=True,
+    )
+    verify_token = _prompt_with_help(
+        "✅ Verify Token (your choice, or press Enter for random)",
+        "verify_token",
+        validator=_validate_verify_token,
+        default=default_verify_token,
+    )
+
+    typer.echo("\n✅ Credentials collected:")
+    typer.echo(f"  Page ID: {page_id}")
+    typer.echo(
+        f"  Token: {page_access_token[:20]}...{page_access_token[-10:] if len(page_access_token) > 30 else ''}"
+    )
+    typer.echo(f"  Verify Token: {verify_token}")
+    typer.echo("")
+
+    if not typer.confirm("❓ Do these look correct?", default=True):
+        typer.echo("❌ Aborted. Run setup again to re-enter credentials.")
+        raise typer.Exit(1)
 
     # Step 5: Create bot configuration
     typer.echo("\nCreating bot configuration...")
@@ -312,15 +501,74 @@ def setup():
         typer.echo(f"✗ Error creating bot configuration: {e}", err=True)
         raise typer.Exit(1)
 
-    # Step 6: Print webhook URL
+    # Step 6: Print webhook URL and next steps
     typer.echo("\n" + "=" * 60)
-    typer.echo("✓ Setup complete!")
-    typer.echo("\nNext steps:")
-    typer.echo("1. Configure webhook URL in Facebook App settings:")
-    typer.echo("   https://your-railway-url.railway.app/webhook")
-    typer.echo(f"2. Set verify token: {verify_token}")
-    typer.echo("3. Subscribe to 'messages' events")
+    typer.echo("✅ Setup Complete!")
     typer.echo("=" * 60)
+    typer.echo("")
+    typer.echo("🚀 Your bot configuration is saved.")
+    typer.echo("")
+    typer.echo("📖 Next Steps (IMPORTANT):")
+    typer.echo("")
+    typer.echo("1️⃣  Deploy your app to Railway (or hosting platform)")
+    typer.echo("   $ railway up")
+    typer.echo("")
+    typer.echo("2️⃣  Get your deployment URL from Railway dashboard")
+    typer.echo("   Format: https://your-app-name.railway.app")
+    typer.echo("")
+    typer.echo("3️⃣  Configure Facebook Webhook:")
+    typer.echo("   • Go to: https://developers.facebook.com/apps")
+    typer.echo("   • Your App → Messenger → Settings → Webhooks")
+    typer.echo("   • Click 'Add Callback URL'")
+    typer.echo("")
+    typer.echo("   Callback URL: https://your-app-name.railway.app/webhook")
+    typer.echo(f"   Verify Token: {verify_token}")
+    typer.echo("")
+    typer.echo("   • Click 'Verify and Save'")
+    typer.echo("   • Check 'messages' subscription")
+    typer.echo("   • Click 'Subscribe' for your page")
+    typer.echo("")
+    typer.echo("4️⃣  Test your bot:")
+    typer.echo("   • Send a message to your Facebook Page")
+    typer.echo("   • The bot should respond automatically")
+    typer.echo("")
+    typer.echo("📖 Full guide: docs/FACEBOOK_SETUP_QUICK.md")
+    typer.echo("🐛 Issues? Check RUNBOOK.md")
+    typer.echo("")
+    typer.echo("=" * 60)
+
+    webhook_info_path = _project_root / "WEBHOOK_INFO.txt"
+    try:
+        webhook_info_path.write_text(
+            f"""FACEBOOK WEBHOOK CONFIGURATION
+================================
+
+Callback URL: https://YOUR-APP-NAME.railway.app/webhook
+Verify Token: {verify_token}
+
+Page ID: {page_id}
+
+Webhook Subscriptions:
+- messages (required)
+- messaging_postbacks (optional)
+
+Setup Instructions:
+1. Deploy to Railway
+2. Replace YOUR-APP-NAME with your actual Railway URL
+3. Add webhook in Facebook Developer Console
+4. Subscribe your page to the webhook
+
+Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+""",
+            encoding="utf-8",
+        )
+        typer.echo(f"💾 Webhook info saved to: {webhook_info_path}")
+        typer.echo("")
+    except OSError as e:
+        typer.echo(
+            typer.style(f"⚠️  Could not save WEBHOOK_INFO.txt: {e}", fg=typer.colors.YELLOW),
+            err=True,
+        )
 
 
 @app.command()

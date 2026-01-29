@@ -12,10 +12,18 @@ from src.cli.setup_cli import (
     setup,
     test as cli_test_command,
     _run_test_repl,
+    _validate_page_id,
+    _validate_page_access_token,
+    _validate_verify_token,
     ACTION_CONTINUE,
     ACTION_EXIT,
     ACTION_TEST_BOT,
 )
+
+# Valid Facebook credentials for tests (must pass validation in setup flow)
+VALID_PAGE_ID = "123456789012345"
+VALID_PAGE_ACCESS_TOKEN = "EAAA" + "x" * 100  # EAAA + 100 chars = 104 total
+VALID_VERIFY_TOKEN = "verify-token-12"
 
 
 class TestSetupCLI:
@@ -126,12 +134,14 @@ class TestSetupCLI:
     @patch("src.config.get_settings")
     @patch("src.db.client.get_supabase_client")
     @patch("src.cli.setup_cli.questionary.select")
+    @patch("src.cli.setup_cli.typer.confirm")
     @patch("src.cli.setup_cli.typer.prompt")
     @patch("src.cli.setup_cli.typer.echo")
     def test_setup_complete_flow(
         self,
         mock_echo,
         mock_prompt,
+        mock_confirm,
         mock_questionary_select,
         mock_get_supabase,
         mock_get_settings,
@@ -143,6 +153,7 @@ class TestSetupCLI:
     ):
         """Test complete setup flow (no existing reference doc)."""
         mock_get_ref_doc.return_value = None  # No existing doc; full scrape/build/store
+        mock_confirm.return_value = True
         # Mock settings
         mock_settings = MagicMock()
         mock_settings.copilot_cli_host = "http://localhost:5909"
@@ -169,12 +180,12 @@ class TestSetupCLI:
             "Professional",
         ]
 
-        # Mock typer prompts: website (copy/paste), then Facebook fields only
+        # Mock typer prompts: website, then Facebook credentials (must pass validation)
         mock_prompt.side_effect = [
             "https://example.com",  # website_url
-            "page-123",  # page_id
-            "token-123",  # page_access_token
-            "verify-123",  # verify_token
+            VALID_PAGE_ID,
+            VALID_PAGE_ACCESS_TOKEN,
+            VALID_VERIFY_TOKEN,
         ]
 
         # Run setup
@@ -322,12 +333,14 @@ class TestSetupCLI:
     @patch("src.config.get_settings")
     @patch("src.db.client.get_supabase_client")
     @patch("src.cli.setup_cli.questionary.select")
+    @patch("src.cli.setup_cli.typer.confirm")
     @patch("src.cli.setup_cli.typer.prompt")
     @patch("src.cli.setup_cli.typer.echo")
     def test_setup_tone_selection(
         self,
         mock_echo,
         mock_prompt,
+        mock_confirm,
         mock_questionary_select,
         mock_get_supabase,
         mock_get_settings,
@@ -339,6 +352,7 @@ class TestSetupCLI:
     ):
         """Test tone selection step (arrow-key select)."""
         mock_get_ref_doc.return_value = None
+        mock_confirm.return_value = True
         # Mock settings
         mock_settings = MagicMock()
         mock_settings.copilot_cli_host = "http://localhost:5909"
@@ -351,9 +365,9 @@ class TestSetupCLI:
         ]
         mock_prompt.side_effect = [
             "https://example.com",
-            "page-123",
-            "token-123",
-            "verify-123",
+            VALID_PAGE_ID,
+            VALID_PAGE_ACCESS_TOKEN,
+            VALID_VERIFY_TOKEN,
         ]
         mock_scrape.return_value = ["chunk1"]
         mock_build_ref.return_value = "# Doc"
@@ -374,12 +388,14 @@ class TestSetupCLI:
     @patch("src.config.get_settings")
     @patch("src.db.client.get_supabase_client")
     @patch("src.cli.setup_cli.questionary.select")
+    @patch("src.cli.setup_cli.typer.confirm")
     @patch("src.cli.setup_cli.typer.prompt")
     @patch("src.cli.setup_cli.typer.echo")
     def test_setup_prints_webhook_url(
         self,
         mock_echo,
         mock_prompt,
+        mock_confirm,
         mock_questionary_select,
         mock_get_supabase,
         mock_get_settings,
@@ -391,6 +407,7 @@ class TestSetupCLI:
     ):
         """Test that setup prints webhook URL and next steps."""
         mock_get_ref_doc.return_value = None
+        mock_confirm.return_value = True
         # Mock settings
         mock_settings = MagicMock()
         mock_settings.copilot_cli_host = "http://localhost:5909"
@@ -403,9 +420,9 @@ class TestSetupCLI:
         ]
         mock_prompt.side_effect = [
             "https://example.com",
-            "page-123",
-            "token-123",
-            "verify-123",
+            VALID_PAGE_ID,
+            VALID_PAGE_ACCESS_TOKEN,
+            VALID_VERIFY_TOKEN,
         ]
         mock_scrape.return_value = ["chunk1"]
         mock_build_ref.return_value = "# Doc"
@@ -427,12 +444,14 @@ class TestSetupCLI:
     @patch("src.config.get_settings")
     @patch("src.db.client.get_supabase_client")
     @patch("src.cli.setup_cli.questionary.select")
+    @patch("src.cli.setup_cli.typer.confirm")
     @patch("src.cli.setup_cli.typer.prompt")
     @patch("src.cli.setup_cli.typer.echo")
     def test_setup_resume_when_ref_doc_exists(
         self,
         mock_echo,
         mock_prompt,
+        mock_confirm,
         mock_questionary_select,
         mock_get_supabase,
         mock_get_settings,
@@ -448,6 +467,7 @@ class TestSetupCLI:
             "source_url": "https://example.com",
             "content": "# Existing doc content",
         }
+        mock_confirm.return_value = True
         mock_create_bot.return_value = MagicMock()
         mock_questionary_select.return_value.ask.side_effect = [
             ACTION_CONTINUE,
@@ -455,9 +475,9 @@ class TestSetupCLI:
         ]
         mock_prompt.side_effect = [
             "https://example.com",
-            "page-789",
-            "token-789",
-            "verify-789",
+            "789012345678901",  # valid 15-digit page ID
+            VALID_PAGE_ACCESS_TOKEN,
+            VALID_VERIFY_TOKEN,
         ]
         setup()
         # Lookup was called with normalized URL
@@ -470,7 +490,7 @@ class TestSetupCLI:
         mock_create_bot.assert_called_once()
         assert mock_create_bot.call_args[1]["reference_doc_id"] == "existing-doc-456"
         assert mock_create_bot.call_args[1]["tone"] == "Friendly"
-        assert mock_create_bot.call_args[1]["page_id"] == "page-789"
+        assert mock_create_bot.call_args[1]["page_id"] == "789012345678901"
 
     @patch("src.cli.setup_cli.create_bot_configuration")
     @patch("src.cli.setup_cli.get_reference_document_by_source_url")
@@ -509,12 +529,14 @@ class TestSetupCLI:
     @patch("src.db.client.get_supabase_client")
     @patch("src.cli.setup_cli._run_test_repl")
     @patch("src.cli.setup_cli.questionary.select")
+    @patch("src.cli.setup_cli.typer.confirm")
     @patch("src.cli.setup_cli.typer.prompt")
     @patch("src.cli.setup_cli.typer.echo")
     def test_setup_test_bot_then_continue(
         self,
         mock_echo,
         mock_prompt,
+        mock_confirm,
         mock_questionary_select,
         mock_run_test_repl,
         mock_get_supabase,
@@ -527,6 +549,7 @@ class TestSetupCLI:
     ):
         """User can select Test the bot, then Continue; bot is created after."""
         mock_get_ref_doc.return_value = None
+        mock_confirm.return_value = True
         mock_settings = MagicMock()
         mock_settings.copilot_cli_host = "http://localhost:5909"
         mock_settings.copilot_enabled = True
@@ -544,9 +567,9 @@ class TestSetupCLI:
         ]
         mock_prompt.side_effect = [
             "https://example.com",
-            "page-123",
-            "token-123",
-            "verify-123",
+            VALID_PAGE_ID,
+            VALID_PAGE_ACCESS_TOKEN,
+            VALID_VERIFY_TOKEN,
         ]
         setup()
         mock_run_test_repl.assert_called_once_with(
@@ -594,6 +617,48 @@ class TestSetupCLI:
         mock_run_test_repl.assert_called_once_with(
             "# Doc content", "Professional", "doc-1", "https://example.com"
         )
+
+
+class TestValidationFunctions:
+    """Test Facebook credential validation helpers."""
+
+    def test_validate_page_id_valid_15_digits(self):
+        assert _validate_page_id("123456789012345") is True
+
+    def test_validate_page_id_valid_17_digits(self):
+        assert _validate_page_id("12345678901234567") is True
+
+    def test_validate_page_id_invalid_short(self):
+        assert _validate_page_id("12345678901234") is False
+
+    def test_validate_page_id_invalid_non_digits(self):
+        assert _validate_page_id("12345678901234a") is False
+        assert _validate_page_id("page-123") is False
+
+    def test_validate_page_id_strips_whitespace(self):
+        assert _validate_page_id("  123456789012345  ") is True
+
+    def test_validate_page_access_token_valid(self):
+        assert _validate_page_access_token("EAAA" + "x" * 100) is True
+
+    def test_validate_page_access_token_invalid_short(self):
+        assert _validate_page_access_token("EAAAshort") is False
+
+    def test_validate_page_access_token_invalid_prefix(self):
+        assert _validate_page_access_token("EAAB" + "x" * 100) is False
+
+    def test_validate_verify_token_valid(self):
+        assert _validate_verify_token("verify-123") is True
+        assert _validate_verify_token("my_bot_token_2024") is True
+        assert _validate_verify_token("a" * 8) is True
+        assert _validate_verify_token("a" * 100) is True
+
+    def test_validate_verify_token_invalid_too_short(self):
+        assert _validate_verify_token("short") is False
+
+    def test_validate_verify_token_invalid_special_chars(self):
+        assert _validate_verify_token("token@123") is False
+        assert _validate_verify_token("token with space") is False
 
 
 class TestRunTestReplPersistence:

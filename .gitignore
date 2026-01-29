@@ -84,3 +84,4 @@ Desktop.ini
 # Project-specific
 # Note: .python-version is kept for uv/python version management
 # Remove this line if you want to ignore it
+WEBHOOK_INFO.txt
