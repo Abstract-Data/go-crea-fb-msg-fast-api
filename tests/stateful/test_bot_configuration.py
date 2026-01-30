@@ -1,7 +1,5 @@
 """Stateful tests for bot configuration operations."""
 
-import pytest
-from unittest.mock import MagicMock
 from datetime import datetime
 
 from src.models.config_models import BotConfiguration

@@ -1,7 +1,7 @@
 """Tests for structured logging with Logfire."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 from datetime import datetime
 import httpx
 
@@ -194,6 +194,10 @@ def test_repository_logs_bot_config_lookup(
 ):
     """Test that repository logs bot configuration lookups."""
     from src.db import repository
+    from src.db.repository import reset_bot_config_cache
+
+    # Reset the cache to ensure we hit the database
+    reset_bot_config_cache()
 
     monkeypatch.setattr(repository, "get_supabase_client", lambda: mock_supabase_client)
 

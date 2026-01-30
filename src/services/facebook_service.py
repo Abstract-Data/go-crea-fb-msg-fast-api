@@ -6,6 +6,8 @@ from typing import Any
 import httpx
 import logfire
 
+from src.config import get_settings
+from src.constants import FACEBOOK_GRAPH_API_VERSION
 from src.models.user_models import FacebookUserInfo
 
 
@@ -42,13 +44,14 @@ async def get_user_info(
         user_id=user_id,
         fields=fields,
     )
-    url = f"https://graph.facebook.com/v18.0/{user_id}"
+    url = f"https://graph.facebook.com/{FACEBOOK_GRAPH_API_VERSION}/{user_id}"
     params = {
         "access_token": page_access_token,
         "fields": ",".join(fields),
     }
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        settings = get_settings()
+        async with httpx.AsyncClient(timeout=settings.facebook_api_timeout_seconds) as client:
             response = await client.get(url, params=params)
             if response.status_code == 200:
                 data = response.json()
@@ -103,17 +106,18 @@ async def send_message(
         "Sending Facebook message",
         recipient_id=recipient_id,
         message_length=len(text),
-        api_version="v18.0",
+        api_version=FACEBOOK_GRAPH_API_VERSION,
     )
 
-    url = "https://graph.facebook.com/v18.0/me/messages"
+    url = f"https://graph.facebook.com/{FACEBOOK_GRAPH_API_VERSION}/me/messages"
 
     params = {"access_token": page_access_token}
 
     payload = {"recipient": {"id": recipient_id}, "message": {"text": text}}
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        settings = get_settings()
+        async with httpx.AsyncClient(timeout=settings.facebook_api_timeout_seconds) as client:
             response = await client.post(url, params=params, json=payload)
             elapsed = time.time() - start_time
 

@@ -6,6 +6,17 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from src.constants import (
+    BROWSER_JS_REFETCH_TIMEOUT_SECONDS,
+    BROWSER_PAGE_LOAD_TIMEOUT_SECONDS,
+    DEFAULT_EMBEDDING_DIMENSIONS,
+    DEFAULT_HTTP_TIMEOUT_SECONDS,
+    DEFAULT_SEARCH_RESULT_LIMIT,
+    FACEBOOK_API_TIMEOUT_SECONDS,
+    MAX_MESSAGES_PER_USER_PER_MINUTE,
+    RATE_LIMIT_WINDOW_SECONDS,
+)
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
@@ -56,11 +67,11 @@ class Settings(BaseSettings):
         description="Embedding model via PAIG (e.g. gateway/openai:text-embedding-3-small)",
     )
     embedding_dimensions: int = Field(
-        default=1536,
+        default=DEFAULT_EMBEDDING_DIMENSIONS,
         description="Embedding vector dimension (matches text-embedding-3-small)",
     )
     search_result_limit: int = Field(
-        default=5,
+        default=DEFAULT_SEARCH_RESULT_LIMIT,
         description="Max number of chunks to return from page search",
     )
 
@@ -85,6 +96,42 @@ class Settings(BaseSettings):
     # Logfire Configuration (NEW - pairs with PAIG)
     logfire_token: str | None = Field(
         default=None, description="Pydantic Logfire token for AI observability"
+    )
+
+    # ==========================================================================
+    # Timeout Configuration
+    # ==========================================================================
+    # All timeouts can be overridden via environment variables.
+    # Defaults are sourced from src/constants.py.
+
+    scraper_timeout_seconds: float = Field(
+        default=DEFAULT_HTTP_TIMEOUT_SECONDS,
+        description="HTTP timeout for scraper requests (seconds)",
+    )
+    facebook_api_timeout_seconds: float = Field(
+        default=FACEBOOK_API_TIMEOUT_SECONDS,
+        description="Timeout for Facebook Graph API calls (seconds)",
+    )
+    browser_page_load_timeout_seconds: float = Field(
+        default=BROWSER_PAGE_LOAD_TIMEOUT_SECONDS,
+        description="Timeout for browser page loads (seconds)",
+    )
+    browser_js_refetch_timeout_seconds: float = Field(
+        default=BROWSER_JS_REFETCH_TIMEOUT_SECONDS,
+        description="Extended timeout for JS-rendered page refetch (seconds)",
+    )
+
+    # ==========================================================================
+    # Rate Limiting Configuration (from GUARDRAILS.md)
+    # ==========================================================================
+
+    rate_limit_max_messages: int = Field(
+        default=MAX_MESSAGES_PER_USER_PER_MINUTE,
+        description="Max messages per user per rate limit window",
+    )
+    rate_limit_window_seconds: int = Field(
+        default=RATE_LIMIT_WINDOW_SECONDS,
+        description="Rate limit sliding window duration in seconds",
     )
 
 

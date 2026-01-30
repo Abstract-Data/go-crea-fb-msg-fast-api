@@ -37,3 +37,22 @@ class BotConfiguration(BaseModel):
     created_at: datetime
     updated_at: datetime
     is_active: bool = True
+
+
+class BotConfigurationCreate(BaseModel):
+    """Parameters for creating a bot configuration.
+
+    Replaces the long parameter list in create_bot_configuration() with a
+    single type-safe parameter object.
+    """
+
+    page_id: str = Field(..., description="Facebook Page ID")
+    website_url: str = Field(..., description="Source website URL")
+    reference_doc_id: str = Field(..., description="Reference document UUID")
+    tone: str = Field(
+        ..., description="Communication tone (e.g., friendly, professional)"
+    )
+    facebook_page_access_token: str = Field(
+        ..., description="Facebook Page access token"
+    )
+    facebook_verify_token: str = Field(..., description="Webhook verify token")

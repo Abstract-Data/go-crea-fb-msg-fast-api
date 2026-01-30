@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import patch
 
 from src.services.agent_service import MessengerAgentService
-from src.models.agent_models import AgentContext, AgentResponse
+from src.models.agent_models import AgentContext
 
 
 class TestAgentConversationStateful:
