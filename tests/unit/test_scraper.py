@@ -9,6 +9,21 @@ import respx as respx_lib
 from src.services.scraper import scrape_website
 
 
+@pytest.fixture(autouse=True)
+def mock_browser_fetch():
+    """Mock _fetch_with_browser_sync so 'first page little text' refetch does not launch Chrome.
+    Returns the same URL content via sync httpx so respx mocks are used and test assertions pass.
+    """
+    def _fake_browser_fetch(url: str, timeout_seconds: float = 30.0) -> str:
+        with httpx.Client(timeout=timeout_seconds, follow_redirects=True) as client:
+            response = client.get(url)
+            response.raise_for_status()
+            return response.text
+
+    with patch("src.services.scraper._fetch_with_browser_sync", side_effect=_fake_browser_fetch):
+        yield
+
+
 class TestScrapeWebsite:
     """Test scrape_website() function."""
     

@@ -3,46 +3,81 @@
 import pytest
 import hashlib
 from hypothesis import given, strategies as st
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch, MagicMock
 
-from src.services.reference_doc import build_reference_doc
-from src.services.copilot_service import CopilotService
+from src.services.reference_doc import build_reference_document, ReferenceDocument
 
 
-class TestBuildReferenceDoc:
-    """Test build_reference_doc() function."""
+class TestBuildReferenceDocument:
+    """Test build_reference_document() function."""
     
     @pytest.mark.asyncio
-    async def test_build_reference_doc_valid_inputs(self, mock_copilot_service):
-        """Test build_reference_doc() with valid inputs."""
-        mock_copilot_service.synthesize_reference.return_value = "# Reference Document\n\nTest content"
-        
-        markdown_content, content_hash = await build_reference_doc(
-            copilot=mock_copilot_service,
-            website_url="https://example.com",
-            text_chunks=["chunk1", "chunk2"]
+    async def test_build_reference_document_valid_inputs(self):
+        """Test build_reference_document() with valid inputs."""
+        mock_doc = ReferenceDocument(
+            overview="Test overview",
+            key_topics=["Topic 1", "Topic 2"],
+            common_questions=["Q1", "Q2"],
+            important_details="Important info",
+            contact_info="contact@example.com"
         )
         
-        assert isinstance(markdown_content, str)
-        assert len(markdown_content) > 0
-        assert isinstance(content_hash, str)
-        assert len(content_hash) == 64  # SHA256 produces 64-character hex string
+        mock_result = MagicMock()
+        mock_result.output = mock_doc
+        
+        mock_settings = MagicMock()
+        mock_settings.default_model = "openai:gpt-4o-mini"
+        with patch('src.services.reference_doc.get_settings', return_value=mock_settings), \
+             patch('src.services.reference_doc.Agent') as mock_agent_class:
+            mock_agent_instance = AsyncMock()
+            mock_agent_instance.run = AsyncMock(return_value=mock_result)
+            mock_agent_class.return_value = mock_agent_instance
+            
+            markdown_content = await build_reference_document(
+                website_url="https://example.com",
+                text_chunks=["chunk1", "chunk2"]
+            )
+            
+            assert isinstance(markdown_content, str)
+            assert len(markdown_content) > 0
+            assert "example.com" in markdown_content
+            assert "Test overview" in markdown_content
     
     @pytest.mark.asyncio
-    async def test_build_reference_doc_calls_copilot(self, mock_copilot_service):
-        """Test that build_reference_doc() calls Copilot service."""
-        mock_copilot_service.synthesize_reference.return_value = "# Test Document"
-        
-        await build_reference_doc(
-            copilot=mock_copilot_service,
-            website_url="https://example.com",
-            text_chunks=["chunk1", "chunk2", "chunk3"]
+    async def test_build_reference_document_calls_agent(self):
+        """Test that build_reference_document() calls PydanticAI agent."""
+        mock_doc = ReferenceDocument(
+            overview="Overview",
+            key_topics=["Topic"],
+            common_questions=["Q"],
+            important_details="Details",
+            contact_info=None
         )
         
-        mock_copilot_service.synthesize_reference.assert_called_once_with(
-            "https://example.com",
-            ["chunk1", "chunk2", "chunk3"]
-        )
+        mock_result = MagicMock()
+        mock_result.output = mock_doc
+        
+        mock_settings = MagicMock()
+        mock_settings.default_model = "openai:gpt-4o-mini"
+        with patch('src.services.reference_doc.get_settings', return_value=mock_settings), \
+             patch('src.services.reference_doc.Agent') as mock_agent_class:
+            mock_agent_instance = AsyncMock()
+            mock_agent_instance.run = AsyncMock(return_value=mock_result)
+            mock_agent_class.return_value = mock_agent_instance
+            
+            await build_reference_document(
+                website_url="https://example.com",
+                text_chunks=["chunk1", "chunk2", "chunk3"]
+            )
+            
+            # Verify agent.run was called
+            mock_agent_instance.run.assert_called_once()
+            call_args = mock_agent_instance.run.call_args
+            assert call_args is not None
+            # Check that the prompt includes website URL and chunks
+            prompt = call_args[0][0]
+            assert "example.com" in prompt
+            assert "chunk1" in prompt
     
     @given(content=st.text(min_size=1, max_size=10000))
     def test_content_hash_determinism(self, content: str):
@@ -70,87 +105,98 @@ class TestBuildReferenceDoc:
         assert hash1 != hash2
     
     @pytest.mark.asyncio
-    async def test_content_hash_format(self, mock_copilot_service):
-        """Test that content hash is in correct format (SHA256 hex)."""
-        mock_copilot_service.synthesize_reference.return_value = "Test content"
-        
-        _, content_hash = await build_reference_doc(
-            copilot=mock_copilot_service,
-            website_url="https://example.com",
-            text_chunks=["chunk1"]
+    async def test_build_reference_document_properties(self):
+        """Test build_reference_document() returns valid markdown."""
+        mock_doc = ReferenceDocument(
+            overview="Overview",
+            key_topics=["Topic 1", "Topic 2"],
+            common_questions=["Q1"],
+            important_details="Details",
+            contact_info="contact@example.com"
         )
         
-        # SHA256 produces 64-character hexadecimal string
-        assert len(content_hash) == 64
-        assert all(c in "0123456789abcdef" for c in content_hash)
+        mock_result = MagicMock()
+        mock_result.output = mock_doc
+        
+        mock_settings = MagicMock()
+        mock_settings.default_model = "openai:gpt-4o-mini"
+        with patch('src.services.reference_doc.get_settings', return_value=mock_settings), \
+             patch('src.services.reference_doc.Agent') as mock_agent_class:
+            mock_agent_instance = AsyncMock()
+            mock_agent_instance.run = AsyncMock(return_value=mock_result)
+            mock_agent_class.return_value = mock_agent_instance
+            
+            text_chunks = ["chunk0", "chunk1", "chunk2"]
+            markdown_content = await build_reference_document(
+                website_url="https://example.com",
+                text_chunks=text_chunks
+            )
+            
+            # Invariants
+            assert isinstance(markdown_content, str)
+            assert len(markdown_content) > 0
+            # Check markdown structure
+            assert "# Reference Document" in markdown_content
+            assert "## Overview" in markdown_content
+            assert "## Key Topics" in markdown_content
     
     @pytest.mark.asyncio
-    async def test_build_reference_doc_properties(self, mock_copilot_service):
-        """Test build_reference_doc() returns valid tuple."""
-        text_chunks = ["chunk0", "chunk1", "chunk2"]
-        mock_copilot_service.synthesize_reference.return_value = "# Test Document"
-        
-        markdown_content, content_hash = await build_reference_doc(
-            copilot=mock_copilot_service,
-            website_url="https://example.com",
-            text_chunks=text_chunks
+    async def test_build_reference_document_with_empty_chunks(self):
+        """Test handling of empty chunks."""
+        mock_doc = ReferenceDocument(
+            overview="Overview",
+            key_topics=[],
+            common_questions=[],
+            important_details="",
+            contact_info=None
         )
         
-        # Invariants
-        assert isinstance(markdown_content, str)
-        assert isinstance(content_hash, str)
-        assert len(content_hash) == 64
-        assert len(markdown_content) > 0
+        mock_result = MagicMock()
+        mock_result.output = mock_doc
+        
+        mock_settings = MagicMock()
+        mock_settings.default_model = "openai:gpt-4o-mini"
+        with patch('src.services.reference_doc.get_settings', return_value=mock_settings), \
+             patch('src.services.reference_doc.Agent') as mock_agent_class:
+            mock_agent_instance = AsyncMock()
+            mock_agent_instance.run = AsyncMock(return_value=mock_result)
+            mock_agent_class.return_value = mock_agent_instance
+            
+            markdown_content = await build_reference_document(
+                website_url="https://example.com",
+                text_chunks=[]
+            )
+            
+            assert isinstance(markdown_content, str)
+            assert "example.com" in markdown_content
     
     @pytest.mark.asyncio
-    async def test_build_reference_doc_hash_consistency(self, mock_copilot_service):
-        """Test that hash is consistent across multiple calls with same content."""
-        content = "# Reference Document\n\nThis is test content."
-        mock_copilot_service.synthesize_reference.return_value = content
-        
-        # First call
-        _, hash1 = await build_reference_doc(
-            copilot=mock_copilot_service,
-            website_url="https://example.com",
-            text_chunks=["chunk1"]
-        )
-        
-        # Reset and call again with same content
-        mock_copilot_service.synthesize_reference.return_value = content
-        _, hash2 = await build_reference_doc(
-            copilot=mock_copilot_service,
-            website_url="https://example.com",
-            text_chunks=["chunk1"]
-        )
-        
-        assert hash1 == hash2
-    
-    @pytest.mark.asyncio
-    async def test_build_reference_doc_empty_content(self, mock_copilot_service):
-        """Test handling of empty content."""
-        mock_copilot_service.synthesize_reference.return_value = ""
-        
-        markdown_content, content_hash = await build_reference_doc(
-            copilot=mock_copilot_service,
-            website_url="https://example.com",
-            text_chunks=["chunk1"]
-        )
-        
-        assert markdown_content == ""
-        # Empty string should still produce a valid hash
-        assert len(content_hash) == 64
-    
-    @pytest.mark.asyncio
-    async def test_build_reference_doc_unicode_content(self, mock_copilot_service):
+    async def test_build_reference_document_unicode_content(self):
         """Test handling of unicode content."""
-        unicode_content = "# 参考文档\n\n这是测试内容。🎉"
-        mock_copilot_service.synthesize_reference.return_value = unicode_content
-        
-        markdown_content, content_hash = await build_reference_doc(
-            copilot=mock_copilot_service,
-            website_url="https://example.com",
-            text_chunks=["chunk1"]
+        mock_doc = ReferenceDocument(
+            overview="概述",
+            key_topics=["主题1", "主题2"],
+            common_questions=["问题1"],
+            important_details="重要信息🎉",
+            contact_info="联系@example.com"
         )
         
-        assert markdown_content == unicode_content
-        assert len(content_hash) == 64
+        mock_result = MagicMock()
+        mock_result.output = mock_doc
+        
+        mock_settings = MagicMock()
+        mock_settings.default_model = "openai:gpt-4o-mini"
+        with patch('src.services.reference_doc.get_settings', return_value=mock_settings), \
+             patch('src.services.reference_doc.Agent') as mock_agent_class:
+            mock_agent_instance = AsyncMock()
+            mock_agent_instance.run = AsyncMock(return_value=mock_result)
+            mock_agent_class.return_value = mock_agent_instance
+            
+            markdown_content = await build_reference_document(
+                website_url="https://example.com",
+                text_chunks=["chunk1"]
+            )
+            
+            assert isinstance(markdown_content, str)
+            assert "概述" in markdown_content
+            assert "🎉" in markdown_content

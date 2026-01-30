@@ -51,11 +51,16 @@ class CorrelationIDMiddleware(BaseHTTPMiddleware):
         # Add to request state for use in handlers
         request.state.correlation_id = correlation_id
         
-        # Add to Logfire context for automatic correlation
-        with logfire.context(correlation_id=correlation_id):
+        # Add to Logfire span for automatic correlation (if available)
+        # Use span with correlation_id in attributes for tracing
+        span_method = getattr(logfire, "span", None)
+        if span_method:
+            with span_method("request", correlation_id=correlation_id):
+                response = await call_next(request)
+                response.headers[self.header_name] = correlation_id
+                return response
+        else:
+            # Fallback if logfire.span is not available (e.g., in tests)
             response = await call_next(request)
-            
-            # Add correlation ID to response headers
             response.headers[self.header_name] = correlation_id
-            
             return response

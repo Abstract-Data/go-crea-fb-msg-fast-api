@@ -11,6 +11,7 @@ from src.db.repository import (
     create_bot_configuration,
     get_bot_configuration_by_page_id,
     get_reference_document,
+    get_reference_document_by_source_url,
     save_message_history
 )
 from src.models.config_models import BotConfiguration
@@ -226,6 +227,53 @@ class TestGetReferenceDocument:
         
         doc = get_reference_document("doc-999")
         
+        assert doc is None
+
+
+class TestGetReferenceDocumentBySourceUrl:
+    """Test get_reference_document_by_source_url() function."""
+
+    @patch('src.db.repository.get_supabase_client')
+    def test_get_reference_document_by_source_url_found(self, mock_get_client):
+        """Test get_reference_document_by_source_url() when document is found."""
+        mock_client = MagicMock()
+        mock_result = MagicMock()
+        mock_result.data = [{
+            "id": "doc-456",
+            "content": "# Existing Doc",
+            "source_url": "https://example.com",
+            "content_hash": "hash456"
+        }]
+        mock_client.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = mock_result
+        mock_get_client.return_value = mock_client
+
+        doc = get_reference_document_by_source_url("https://example.com")
+
+        assert doc is not None
+        assert doc["id"] == "doc-456"
+        assert doc["source_url"] == "https://example.com"
+        mock_client.table.return_value.select.assert_called_once_with("*")
+        mock_client.table.return_value.select.return_value.eq.assert_called_once_with("source_url", "https://example.com")
+
+    @patch('src.db.repository.get_supabase_client')
+    def test_get_reference_document_by_source_url_not_found(self, mock_get_client):
+        """Test get_reference_document_by_source_url() when no document exists."""
+        mock_client = MagicMock()
+        mock_result = MagicMock()
+        mock_result.data = []
+        mock_client.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = mock_result
+        mock_get_client.return_value = mock_client
+
+        doc = get_reference_document_by_source_url("https://unknown.com")
+
+        assert doc is None
+
+    @patch('src.db.repository.get_supabase_client')
+    def test_get_reference_document_by_source_url_empty_url_returns_none(self, mock_get_client):
+        """Test get_reference_document_by_source_url() with empty URL returns None without querying."""
+        doc = get_reference_document_by_source_url("")
+        assert doc is None
+        doc = get_reference_document_by_source_url("   ")
         assert doc is None
 
 

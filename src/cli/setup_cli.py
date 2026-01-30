@@ -1,19 +1,57 @@
 """Typer-based interactive setup CLI."""
 
+import os
+os.environ.setdefault("LOGFIRE_IGNORE_NO_CONFIG", "1")
+
+from pathlib import Path
+_project_root = Path(__file__).resolve().parent.parent.parent
+from dotenv import load_dotenv
+load_dotenv(_project_root / ".env")
+load_dotenv(_project_root / ".env.local")
+
 import asyncio
+import questionary
 import typer
 
 from src.services.scraper import scrape_website
 from src.services.reference_doc import build_reference_document
-from src.db.repository import create_bot_configuration, create_reference_document
+from src.db.repository import (
+    create_bot_configuration,
+    create_reference_document,
+    get_reference_document_by_source_url,
+)
+from src.models.agent_models import AgentContext
+from src.services.agent_service import MessengerAgentService
 
 app = typer.Typer()
+
+# Tone choices for arrow-key selection (copy/paste only for URL and Facebook fields).
+TONE_CHOICES = ["Professional", "Friendly", "Casual"]
+
+ACTION_CONTINUE = "Continue to tone & Facebook config"
+ACTION_TEST_BOT = "Test the bot"
+ACTION_EXIT = "Exit"
+
+
+def _normalize_website_url(url: str) -> str:
+    """Normalize URL for lookup and storage (e.g. strip trailing slash)."""
+    if not url or not url.strip():
+        return url
+    u = url.strip()
+    return u.rstrip("/") if u != "https://" and u != "http://" else u
+
+
+@app.callback(invoke_without_command=True)
+def _default(ctx: typer.Context):
+    """Run setup when no subcommand is given."""
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(setup)
 
 
 def _run_async_with_cleanup(coro):
     """
     Run async coroutine with proper cleanup of event loop and resources.
-    
+
     Ensures all pending tasks are cancelled and the event loop is properly closed
     even when exceptions occur, preventing resource warnings.
     """
@@ -71,91 +109,192 @@ def _run_async_with_cleanup(coro):
                         pass
 
 
+def _select_tone(message: str = "Select a tone") -> str:
+    """Arrow-key selection for tone. Returns chosen tone string."""
+    choice = questionary.select(
+        message,
+        choices=TONE_CHOICES,
+    ).ask()
+    if choice is None:
+        raise typer.Exit(0)
+    return choice
+
+
+def _run_test_repl(ref_doc_content: str, tone: str) -> None:
+    """
+    Run the test REPL: user types messages, agent responds. No Facebook required.
+    Uses placeholder bot_config_id; agent only needs reference_doc and tone.
+    """
+    context = AgentContext(
+        bot_config_id="cli-test",
+        reference_doc=ref_doc_content,
+        tone=tone,
+        recent_messages=[],
+    )
+    agent = MessengerAgentService()
+    typer.echo("\nTest the bot (type 'quit' or press Enter with empty message to exit).\n")
+    recent_messages: list[str] = []
+
+    while True:
+        user_message = typer.prompt("You (or 'quit' to exit)")
+        if not user_message or user_message.strip().lower() == "quit":
+            break
+        user_message = user_message.strip()
+        # Update context with recent conversation for this session
+        context.recent_messages = recent_messages[-6:]  # Last 3 exchanges
+        try:
+            response = _run_async_with_cleanup(agent.respond(context, user_message))
+            typer.echo(f"Bot: {response.message}")
+            if response.requires_escalation and response.escalation_reason:
+                typer.echo(typer.style(f"  [escalation: {response.escalation_reason}]", fg=typer.colors.YELLOW))
+            recent_messages.append(f"User: {user_message}")
+            recent_messages.append(f"Bot: {response.message}")
+        except Exception as e:
+            typer.echo(f"Error: {e}", err=True)
+    typer.echo("Exiting test.\n")
+
+
+def _action_menu() -> str | None:
+    """Show post-reference-doc action menu (arrow-key). Returns choice or None if Exit."""
+    choice = questionary.select(
+        "What would you like to do?",
+        choices=[
+            questionary.Choice(ACTION_CONTINUE, value=ACTION_CONTINUE),
+            questionary.Choice(ACTION_TEST_BOT, value=ACTION_TEST_BOT),
+            questionary.Choice(ACTION_EXIT, value=ACTION_EXIT),
+        ],
+    ).ask()
+    return choice
+
+
 @app.command()
 def setup():
     """
     Interactive setup:
-    1) Ask for website
-    2) Scrape + build reference doc via PydanticAI Gateway
-    3) Ask for tone (with recommendations)
-    4) Ask for Facebook Page config
-    5) Persist bot config in Supabase
+    1) Ask for website (copy/paste)
+    2) Scrape + build reference doc (or resume using existing doc for this URL)
+    3) Action menu: Continue to Facebook config, Test the bot, or Exit
+    4) If Continue: select tone (arrows), then Facebook credentials (copy/paste), persist bot
+    5) If Test the bot: select tone, then REPL to try the agent (no Facebook needed)
+
+    Only website URL and Facebook credential fields use copy/paste; tone and menus use arrow keys.
     """
-    
-    # Step 1: Website URL
+    import hashlib
+
+    # Step 1: Website URL (copy/paste)
     website_url = typer.prompt("What website should the bot be based on?")
-    
-    typer.echo(f"Scraping {website_url}...")
-    try:
-        text_chunks = _run_async_with_cleanup(scrape_website(website_url))
-        typer.echo(f"✓ Scraped {len(text_chunks)} text chunks")
-    except Exception as e:
-        typer.echo(f"✗ Error scraping website: {e}", err=True)
-        raise typer.Exit(1)
-    
-    # Step 2: Build reference doc
-    typer.echo("Generating reference document via PydanticAI Gateway...")
-    try:
-        markdown_content = _run_async_with_cleanup(
-            build_reference_document(website_url, text_chunks)
-        )
-        # Calculate content hash
-        import hashlib
-        content_hash = hashlib.sha256(markdown_content.encode()).hexdigest()
-        typer.echo("✓ Reference document generated")
-    except Exception as e:
-        typer.echo(f"✗ Error generating reference doc: {e}", err=True)
-        raise typer.Exit(1)
-    
-    # Step 3: Tone selection
-    # TODO: Use AI to suggest tones from content
-    recommended_tones = ["Professional", "Friendly", "Casual"]
-    typer.echo(f"\nRecommended tones: {', '.join(recommended_tones)}")
-    tone = typer.prompt("Select a tone", default="Professional")
-    
-    # Step 4: Facebook configuration
+    normalized_url = _normalize_website_url(website_url)
+
+    ref_doc_content: str
+    reference_doc_id: str
+
+    # Check for existing reference document (resume path)
+    existing_doc = get_reference_document_by_source_url(normalized_url)
+    if existing_doc:
+        reference_doc_id = existing_doc["id"]
+        ref_doc_content = existing_doc["content"]
+        typer.echo(f"✓ Found existing reference document for {normalized_url}")
+        typer.echo("  Skipping scrape and document generation.")
+    else:
+        # Step 2a: Scrape
+        typer.echo(f"Scraping {normalized_url}...")
+        try:
+            text_chunks = _run_async_with_cleanup(scrape_website(normalized_url))
+            typer.echo(f"✓ Scraped {len(text_chunks)} text chunks")
+        except Exception as e:
+            typer.echo(f"✗ Error scraping website: {e}", err=True)
+            raise typer.Exit(1)
+
+        # Step 2b: Build reference doc
+        typer.echo("Generating reference document via PydanticAI Gateway...")
+        try:
+            markdown_content = _run_async_with_cleanup(
+                build_reference_document(normalized_url, text_chunks)
+            )
+            content_hash = hashlib.sha256(markdown_content.encode()).hexdigest()
+            typer.echo("✓ Reference document generated")
+        except Exception as e:
+            typer.echo(f"✗ Error generating reference doc: {e}", err=True)
+            raise typer.Exit(1)
+
+        # Step 2c: Store reference document immediately (so we can resume later)
+        typer.echo("Storing reference document...")
+        try:
+            reference_doc_id = create_reference_document(
+                content=markdown_content,
+                source_url=normalized_url,
+                content_hash=content_hash,
+            )
+            typer.echo("✓ Reference document stored")
+        except Exception as e:
+            typer.echo(f"✗ Error storing reference document: {e}", err=True)
+            raise typer.Exit(1)
+        ref_doc_content = markdown_content
+
+    # Step 3: Action menu (arrow-key); loop so user can Test then Continue or Exit
+    while True:
+        action = _action_menu()
+        if action is None or action == ACTION_EXIT:
+            typer.echo("Exiting. Run setup again with the same URL to continue later.")
+            return
+        if action == ACTION_TEST_BOT:
+            tone = _select_tone("Select a tone for testing")
+            _run_test_repl(ref_doc_content, tone)
+            continue
+        # ACTION_CONTINUE
+        break
+
+    # Step 4: Tone (arrow-key) then Facebook config (copy/paste)
+    tone = _select_tone("Select a tone for your bot")
     page_id = typer.prompt("Facebook Page ID")
     page_access_token = typer.prompt("Facebook Page Access Token")
-    verify_token = typer.prompt("Verify Token (for webhook)", default=typer.style("random-token-123", fg=typer.colors.YELLOW))
-    
-    # Step 5: Store reference document
-    typer.echo("\nStoring reference document...")
-    try:
-        reference_doc_id = create_reference_document(
-            content=markdown_content,
-            source_url=website_url,
-            content_hash=content_hash
-        )
-        typer.echo("✓ Reference document stored")
-    except Exception as e:
-        typer.echo(f"✗ Error storing reference document: {e}", err=True)
-        raise typer.Exit(1)
-    
-    # Step 6: Create bot configuration
+    verify_token = typer.prompt(
+        "Verify Token (for webhook)",
+        default=typer.style("random-token-123", fg=typer.colors.YELLOW),
+    )
+
+    # Step 5: Create bot configuration
     typer.echo("\nCreating bot configuration...")
     try:
         create_bot_configuration(
             page_id=page_id,
-            website_url=website_url,
+            website_url=normalized_url,
             reference_doc_id=reference_doc_id,
             tone=tone,
             facebook_page_access_token=page_access_token,
-            facebook_verify_token=verify_token
+            facebook_verify_token=verify_token,
         )
         typer.echo("✓ Bot configuration created")
     except Exception as e:
         typer.echo(f"✗ Error creating bot configuration: {e}", err=True)
         raise typer.Exit(1)
-    
-    # Step 7: Print webhook URL
-    typer.echo("\n" + "="*60)
+
+    # Step 6: Print webhook URL
+    typer.echo("\n" + "=" * 60)
     typer.echo("✓ Setup complete!")
     typer.echo("\nNext steps:")
     typer.echo("1. Configure webhook URL in Facebook App settings:")
     typer.echo("   https://your-railway-url.railway.app/webhook")
     typer.echo(f"2. Set verify token: {verify_token}")
     typer.echo("3. Subscribe to 'messages' events")
-    typer.echo("="*60)
+    typer.echo("=" * 60)
+
+
+@app.command()
+def test():
+    """
+    Test the bot using an existing reference document (no Facebook credentials).
+    Paste the website URL; if a reference doc exists for that URL, you can chat with the bot.
+    """
+    website_url = typer.prompt("Website URL (for which you already have a reference document)")
+    normalized_url = _normalize_website_url(website_url)
+    existing_doc = get_reference_document_by_source_url(normalized_url)
+    if not existing_doc:
+        typer.echo("No reference document found for this URL. Run setup first to scrape and generate one.", err=True)
+        raise typer.Exit(1)
+    ref_doc_content = existing_doc["content"]
+    tone = _select_tone("Select a tone for testing")
+    _run_test_repl(ref_doc_content, tone)
 
 
 if __name__ == "__main__":

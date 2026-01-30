@@ -11,7 +11,9 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # Load .env first, then .env.local (for local/test overrides)
+        # Later files override earlier ones, so .env.local takes precedence
+        env_file=[".env", ".env.local"],
         env_file_encoding="utf-8",
         case_sensitive=False
     )
@@ -38,6 +40,11 @@ class Settings(BaseSettings):
     supabase_service_key: str = Field(
         ...,
         description="Supabase service role key"
+    )
+    # Postgres connection string for running migrations (Supabase Dashboard → Database → Connection string)
+    database_url: str | None = Field(
+        default=None,
+        description="Postgres URI for migrations (e.g. postgresql://postgres:PASSWORD@db.xxx.supabase.co:5432/postgres)",
     )
     
     # PydanticAI Gateway Configuration
