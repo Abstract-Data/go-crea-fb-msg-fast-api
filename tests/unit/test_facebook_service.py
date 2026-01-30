@@ -1,11 +1,12 @@
 """Tests for Facebook service."""
 
+import json
 import pytest
 from hypothesis import given, strategies as st
 import httpx
 import respx
 
-from src.services.facebook_service import send_message
+from src.services.facebook_service import get_user_info, send_message
 
 
 class TestSendMessage:
@@ -194,7 +195,100 @@ class TestSendMessage:
         )
 
         request = respx.calls.last.request
-        import json
-
         payload = json.loads(request.content.decode("utf-8"))
         assert len(payload["message"]["text"]) == 5000
+
+
+class TestGetUserInfo:
+    """Test get_user_info() function."""
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_get_user_info_success(self):
+        """get_user_info returns FacebookUserInfo on 200."""
+        respx.get("https://graph.facebook.com/v18.0/user-123").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "user-123",
+                    "first_name": "Jane",
+                    "last_name": "Doe",
+                    "picture": {
+                        "data": {"url": "https://graph.facebook.com/pic/user-123"}
+                    },
+                    "locale": "en_US",
+                    "timezone": -6,
+                },
+            )
+        )
+
+        out = await get_user_info(
+            page_access_token="token", user_id="user-123"
+        )
+        assert out is not None
+        assert out.id == "user-123"
+        assert out.first_name == "Jane"
+        assert out.last_name == "Doe"
+        assert out.profile_pic == "https://graph.facebook.com/pic/user-123"
+        assert out.locale == "en_US"
+        assert out.timezone == -6
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_get_user_info_no_picture(self):
+        """get_user_info handles missing picture."""
+        respx.get("https://graph.facebook.com/v18.0/user-456").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "user-456",
+                    "first_name": "John",
+                    "locale": "en_GB",
+                },
+            )
+        )
+
+        out = await get_user_info(
+            page_access_token="token", user_id="user-456"
+        )
+        assert out is not None
+        assert out.first_name == "John"
+        assert out.profile_pic is None
+        assert out.locale == "en_GB"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_get_user_info_http_error(self):
+        """get_user_info returns None on non-200."""
+        respx.get("https://graph.facebook.com/v18.0/user-789").mock(
+            return_value=httpx.Response(401, json={"error": {"message": "Invalid"}})
+        )
+
+        out = await get_user_info(
+            page_access_token="bad-token", user_id="user-789"
+        )
+        assert out is None
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_get_user_info_request_format(self):
+        """get_user_info requests correct fields and token."""
+        respx.get("https://graph.facebook.com/v18.0/psid-1").mock(
+            return_value=httpx.Response(
+                200,
+                json={"id": "psid-1", "first_name": "A"},
+            )
+        )
+
+        await get_user_info(
+            page_access_token="my-page-token", user_id="psid-1"
+        )
+
+        req = respx.calls.last.request
+        assert "access_token" in str(req.url)
+        assert "my-page-token" in str(req.url)
+        assert "first_name" in str(req.url)
+        assert "last_name" in str(req.url)
+        assert "picture" in str(req.url)
+        assert "locale" in str(req.url)
+        assert "timezone" in str(req.url)

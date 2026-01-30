@@ -12,11 +12,16 @@ from src.db.repository import (
     get_bot_configuration_by_page_id,
     get_reference_document,
     get_reference_document_by_source_url,
+    get_user_profile,
+    create_user_profile,
+    update_user_profile,
+    upsert_user_profile,
     save_message_history,
     create_test_session,
     save_test_message,
 )
 from src.models.config_models import BotConfiguration
+from src.models.user_models import UserProfileCreate, UserProfileUpdate
 
 
 class TestCreateReferenceDocument:
@@ -346,6 +351,137 @@ class TestSaveMessageHistory:
         insert_call = mock_client.table.return_value.insert.call_args[0][0]
         assert insert_call["requires_escalation"] is True
         assert insert_call["confidence"] == 0.3
+
+    @patch("src.db.repository.get_supabase_client")
+    def test_save_message_history_with_user_profile_id(self, mock_get_client):
+        """Test save_message_history() with user_profile_id."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        save_message_history(
+            bot_id="bot-123",
+            sender_id="user-456",
+            message_text="Hello",
+            response_text="Hi there",
+            confidence=0.9,
+            requires_escalation=False,
+            user_profile_id="profile-uuid-789",
+        )
+
+        insert_call = mock_client.table.return_value.insert.call_args[0][0]
+        assert insert_call["user_profile_id"] == "profile-uuid-789"
+
+
+class TestUserProfileRepository:
+    """Test user profile repository functions."""
+
+    @patch("src.db.repository.get_supabase_client")
+    def test_get_user_profile_found(self, mock_get_client):
+        """get_user_profile returns profile when found."""
+        mock_client = MagicMock()
+        mock_result = MagicMock()
+        mock_result.data = [
+            {
+                "id": "prof-1",
+                "sender_id": "user-1",
+                "page_id": "page-1",
+                "first_name": "Jane",
+                "last_name": "Doe",
+            }
+        ]
+        chain = (
+            mock_client.table.return_value.select.return_value.eq.return_value.execute
+        )
+        chain.return_value = mock_result
+        mock_get_client.return_value = mock_client
+
+        out = get_user_profile("user-1", "page-1")
+        assert out is not None
+        assert out["sender_id"] == "user-1"
+        assert out["first_name"] == "Jane"
+
+    @patch("src.db.repository.get_supabase_client")
+    def test_get_user_profile_not_found(self, mock_get_client):
+        """get_user_profile returns None when not found."""
+        mock_client = MagicMock()
+        mock_result = MagicMock()
+        mock_result.data = []
+        chain = (
+            mock_client.table.return_value.select.return_value.eq.return_value.execute
+        )
+        chain.return_value = mock_result
+        mock_get_client.return_value = mock_client
+
+        out = get_user_profile("user-1", "page-1")
+        assert out is None
+
+    @patch("src.db.repository.get_supabase_client")
+    def test_create_user_profile(self, mock_get_client):
+        """create_user_profile inserts and returns id."""
+        mock_client = MagicMock()
+        mock_result = MagicMock()
+        mock_result.data = [{"id": "prof-new"}]
+        mock_client.table.return_value.insert.return_value.execute.return_value = (
+            mock_result
+        )
+        mock_get_client.return_value = mock_client
+
+        profile = UserProfileCreate(sender_id="user-1", page_id="page-1")
+        uid = create_user_profile(profile)
+        assert uid == "prof-new"
+        mock_client.table.assert_called_with("user_profiles")
+        insert_call = mock_client.table.return_value.insert.call_args[0][0]
+        assert insert_call["sender_id"] == "user-1"
+        assert insert_call["page_id"] == "page-1"
+
+    @patch("src.db.repository.get_supabase_client")
+    def test_update_user_profile(self, mock_get_client):
+        """update_user_profile updates by sender_id."""
+        mock_client = MagicMock()
+        mock_result = MagicMock()
+        mock_result.data = [{"id": "prof-1"}]
+        chain = (
+            mock_client.table.return_value.update.return_value.eq.return_value.execute
+        )
+        chain.return_value = mock_result
+        mock_get_client.return_value = mock_client
+
+        updates = UserProfileUpdate(
+            location_lat=30.27,
+            location_long=-97.74,
+            location_title="Austin, TX",
+        )
+        ok = update_user_profile("user-1", "page-1", updates)
+        assert ok is True
+        mock_client.table.return_value.update.assert_called_once()
+        update_call = mock_client.table.return_value.update.call_args[0][0]
+        assert update_call["location_lat"] == 30.27
+        assert update_call["location_title"] == "Austin, TX"
+
+    @patch("src.db.repository.get_supabase_client")
+    def test_upsert_user_profile(self, mock_get_client):
+        """upsert_user_profile upserts on sender_id."""
+        mock_client = MagicMock()
+        mock_result = MagicMock()
+        mock_result.data = [{"id": "prof-upserted"}]
+        chain = (
+            mock_client.table.return_value.upsert.return_value.execute
+        )
+        chain.return_value = mock_result
+        mock_get_client.return_value = mock_client
+
+        profile = UserProfileCreate(
+            sender_id="user-1",
+            page_id="page-1",
+            first_name="Jane",
+            locale="en_US",
+        )
+        uid = upsert_user_profile(profile)
+        assert uid == "prof-upserted"
+        mock_client.table.assert_called_with("user_profiles")
+        upsert_call = mock_client.table.return_value.upsert.call_args[0][0]
+        assert upsert_call["sender_id"] == "user-1"
+        assert upsert_call["first_name"] == "Jane"
 
 
 class TestCreateTestSession:

@@ -1,6 +1,7 @@
 """PydanticAI agent service using Gateway."""
 
 import logging
+import re
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -23,7 +24,9 @@ class MessengerAgentDeps(BaseModel):
     reference_doc: str
     tone: str
     recent_messages: list[str] = Field(default_factory=list)
-    tenant_id: str | None = None  # For multi-tenant tracking
+    tenant_id: str | None = None
+    user_name: str | None = None
+    user_location: str | None = None
 
 
 class MessengerAgentService:
@@ -67,7 +70,6 @@ class MessengerAgentService:
         """Build dynamic system prompt from context and prompts/agent_system_instructions.md."""
         deps = ctx.deps
         template = self._load_system_prompt_template()
-        # Use only the body after --- (title/description above are for humans)
         if "---" in template:
             template = template.split("---", 1)[-1].strip()
         recent = (
@@ -75,11 +77,44 @@ class MessengerAgentService:
             if deps.recent_messages
             else "No previous messages"
         )
-        return (
+        prompt = (
             template.replace("{{ tone }}", deps.tone)
             .replace("{{ reference_doc }}", deps.reference_doc)
             .replace("{{ recent_messages }}", recent)
         )
+        if deps.user_name:
+            prompt = re.sub(
+                r"{% if user_name %}\s*(.*?)\s*{% endif %}",
+                lambda m: m.group(1).replace("{{ user_name }}", deps.user_name),
+                prompt,
+                count=1,
+                flags=re.DOTALL,
+            )
+        else:
+            prompt = re.sub(
+                r"{% if user_name %}.*?{% endif %}",
+                "",
+                prompt,
+                count=1,
+                flags=re.DOTALL,
+            )
+        if deps.user_location:
+            prompt = re.sub(
+                r"{% if user_location %}\s*(.*?)\s*{% endif %}",
+                lambda m: m.group(1).replace("{{ user_location }}", deps.user_location),
+                prompt,
+                count=1,
+                flags=re.DOTALL,
+            )
+        else:
+            prompt = re.sub(
+                r"{% if user_location %}.*?{% endif %}",
+                "",
+                prompt,
+                count=1,
+                flags=re.DOTALL,
+            )
+        return prompt
 
     def _register_tools(self) -> None:
         """Register any tools the agent can use."""
@@ -115,6 +150,8 @@ class MessengerAgentService:
             tone=context.tone,
             recent_messages=context.recent_messages,
             tenant_id=getattr(context, "tenant_id", None),
+            user_name=getattr(context, "user_name", None),
+            user_location=getattr(context, "user_location", None),
         )
 
         try:

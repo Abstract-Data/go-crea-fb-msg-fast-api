@@ -16,6 +16,12 @@ from src.models.config_models import (
     FacebookConfig,
     BotConfiguration,
 )
+from src.models.user_models import (
+    UserProfileCreate,
+    UserProfileUpdate,
+    FacebookUserInfo,
+    FacebookLocation,
+)
 
 
 # Custom URL strategy since Hypothesis doesn't have st.urls()
@@ -284,3 +290,76 @@ class TestConfigModels:
         assert config.updated_at == now
         assert isinstance(config.created_at, datetime)
         assert isinstance(config.updated_at, datetime)
+
+
+class TestUserProfileModels:
+    """Test user profile models (no consent required)."""
+
+    def test_user_profile_create_minimal(self):
+        """UserProfileCreate with required fields only."""
+        p = UserProfileCreate(sender_id="psid-123", page_id="page-456")
+        assert p.sender_id == "psid-123"
+        assert p.page_id == "page-456"
+        assert p.first_name is None
+        assert p.location_title is None
+
+    def test_user_profile_create_full(self):
+        """UserProfileCreate with optional profile and location fields."""
+        p = UserProfileCreate(
+            sender_id="psid-1",
+            page_id="page-1",
+            first_name="Jane",
+            last_name="Doe",
+            profile_pic="https://example.com/pic.jpg",
+            locale="en_US",
+            timezone=-6,
+            location_lat=30.27,
+            location_long=-97.74,
+            location_title="Austin, TX",
+            location_address="123 Main St",
+        )
+        assert p.first_name == "Jane"
+        assert p.last_name == "Doe"
+        assert p.locale == "en_US"
+        assert p.timezone == -6
+        assert p.location_lat == 30.27
+        assert p.location_long == -97.74
+        assert p.location_title == "Austin, TX"
+        assert p.location_address == "123 Main St"
+
+    def test_user_profile_update_partial(self):
+        """UserProfileUpdate allows partial updates."""
+        u = UserProfileUpdate(location_lat=1.0, location_long=2.0)
+        assert u.location_lat == 1.0
+        assert u.location_long == 2.0
+        assert u.first_name is None
+
+    def test_facebook_user_info(self):
+        """FacebookUserInfo from Graph API payload."""
+        info = FacebookUserInfo(
+            id="psid-1",
+            first_name="John",
+            last_name="Doe",
+            profile_pic="https://graph.facebook.com/pic",
+            locale="en_US",
+            timezone=-6,
+        )
+        assert info.id == "psid-1"
+        assert info.first_name == "John"
+        assert info.locale == "en_US"
+
+    def test_facebook_user_info_minimal(self):
+        """FacebookUserInfo with only id."""
+        info = FacebookUserInfo(id="psid-1")
+        assert info.id == "psid-1"
+        assert info.first_name is None
+        assert info.profile_pic is None
+
+    def test_facebook_location(self):
+        """FacebookLocation model."""
+        loc = FacebookLocation(lat=30.27, long=-97.74, title="Austin, TX")
+        assert loc.lat == 30.27
+        assert loc.long == -97.74
+        assert loc.title == "Austin, TX"
+        assert loc.address is None
+        assert loc.url is None

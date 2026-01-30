@@ -10,7 +10,9 @@ class AgentContext(BaseModel):
     reference_doc: str
     tone: str
     recent_messages: list[str] = Field(default_factory=list)
-    tenant_id: str | None = None  # NEW: For multi-tenant support
+    tenant_id: str | None = None
+    user_name: str | None = None
+    user_location: str | None = None
 
 
 class AgentResponse(BaseModel):
