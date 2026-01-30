@@ -13,35 +13,32 @@ async def send_message(
 ) -> None:
     """
     Send message via Facebook Graph API.
-    
+
     Args:
         page_access_token: Facebook Page access token
         recipient_id: Facebook user ID to send message to
         text: Message text to send
     """
     start_time = time.time()
-    
+
     logfire.info(
         "Sending Facebook message",
         recipient_id=recipient_id,
         message_length=len(text),
         api_version="v18.0",
     )
-    
+
     url = "https://graph.facebook.com/v18.0/me/messages"
-    
+
     params = {"access_token": page_access_token}
-    
-    payload = {
-        "recipient": {"id": recipient_id},
-        "message": {"text": text}
-    }
-    
+
+    payload = {"recipient": {"id": recipient_id}, "message": {"text": text}}
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(url, params=params, json=payload)
             elapsed = time.time() - start_time
-            
+
             if response.status_code == 200:
                 response_data = response.json()
                 logfire.info(
@@ -59,7 +56,7 @@ async def send_message(
                     response_body=response.text[:500],  # Limit response body length
                     response_time_ms=elapsed * 1000,
                 )
-            
+
             response.raise_for_status()
     except httpx.HTTPStatusError as e:
         elapsed = time.time() - start_time

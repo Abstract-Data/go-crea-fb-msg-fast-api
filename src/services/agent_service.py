@@ -19,6 +19,7 @@ _AGENT_SYSTEM_PROMPT_PATH = _PROJECT_ROOT / "prompts" / "agent_system_instructio
 
 class MessengerAgentDeps(BaseModel):
     """Dependencies passed to the agent at runtime."""
+
     reference_doc: str
     tone: str
     recent_messages: list[str] = Field(default_factory=list)
@@ -27,18 +28,18 @@ class MessengerAgentDeps(BaseModel):
 
 class MessengerAgentService:
     """Service for generating AI agent responses using PydanticAI Gateway."""
-    
+
     def __init__(self, model: str | None = None):
         """
         Initialize agent service with PydanticAI Gateway.
-        
+
         Args:
-            model: Model string (e.g., 'gateway/openai:gpt-4o')
+            model: Model string (e.g., 'gateway/anthropic:claude-3-5-sonnet-latest')
                    Defaults to settings.default_model
         """
         settings = get_settings()
         model_name = model or settings.default_model
-        
+
         # Create agent with structured output (system_prompt is registered below via decorator)
         self.agent = Agent(
             model_name,
@@ -51,9 +52,9 @@ class MessengerAgentService:
 
         # Register tools
         self._register_tools()
-        
+
         logger.info(f"MessengerAgentService initialized with model: {model_name}")
-    
+
     def _load_system_prompt_template(self) -> str:
         """Load system prompt from prompts/agent_system_instructions.md."""
         if not _AGENT_SYSTEM_PROMPT_PATH.exists():
@@ -74,24 +75,25 @@ class MessengerAgentService:
             if deps.recent_messages
             else "No previous messages"
         )
-        return template.replace("{{ tone }}", deps.tone).replace(
-            "{{ reference_doc }}", deps.reference_doc
-        ).replace("{{ recent_messages }}", recent)
-    
+        return (
+            template.replace("{{ tone }}", deps.tone)
+            .replace("{{ reference_doc }}", deps.reference_doc)
+            .replace("{{ recent_messages }}", recent)
+        )
+
     def _register_tools(self) -> None:
         """Register any tools the agent can use."""
-        
+
         @self.agent.tool
         async def check_reference_coverage(
-            ctx: RunContext[MessengerAgentDeps],
-            topic: str
+            ctx: RunContext[MessengerAgentDeps], topic: str
         ) -> str:
             """Check if a topic is covered in the reference document."""
             ref_doc = ctx.deps.reference_doc.lower()
             if topic.lower() in ref_doc:
                 return f"Topic '{topic}' is covered in the reference document."
             return f"Topic '{topic}' is NOT covered. Consider escalating to human."
-    
+
     async def respond(
         self,
         context: AgentContext,
@@ -99,11 +101,11 @@ class MessengerAgentService:
     ) -> AgentResponse:
         """
         Generate agent response to user message.
-        
+
         Args:
             context: Agent context with reference doc and tone
             user_message: User's message text
-            
+
         Returns:
             AgentResponse with message, confidence, and escalation flags
         """
@@ -112,25 +114,25 @@ class MessengerAgentService:
             reference_doc=context.reference_doc,
             tone=context.tone,
             recent_messages=context.recent_messages,
-            tenant_id=getattr(context, 'tenant_id', None),
+            tenant_id=getattr(context, "tenant_id", None),
         )
-        
+
         try:
             # Run the agent
             result = await self.agent.run(user_message, deps=deps)
-            
+
             # Result.output is already typed as AgentResponse
             response = result.output
-            
+
             # Log usage for debugging
             logger.info(
                 f"Agent response generated - "
                 f"confidence: {response.confidence}, "
                 f"escalation: {response.requires_escalation}"
             )
-            
+
             return response
-            
+
         except Exception as e:
             logger.error(f"Agent error: {e}")
             # Return safe fallback response
@@ -138,9 +140,9 @@ class MessengerAgentService:
                 message="I'm having trouble processing your request. A team member will follow up with you shortly.",
                 confidence=0.0,
                 requires_escalation=True,
-                escalation_reason=f"Agent error: {str(e)}"
+                escalation_reason=f"Agent error: {str(e)}",
             )
-    
+
     async def respond_with_fallback(
         self,
         context: AgentContext,
@@ -148,12 +150,12 @@ class MessengerAgentService:
     ) -> AgentResponse:
         """
         Generate response with automatic model fallback.
-        
+
         Uses FallbackModel to try primary model first,
         then fallback model if primary fails.
         """
         settings = get_settings()
-        
+
         # Create fallback model
         fallback_agent = Agent(
             FallbackModel(
@@ -163,13 +165,13 @@ class MessengerAgentService:
             output_type=AgentResponse,
             system_prompt=self._build_system_prompt,
         )
-        
+
         deps = MessengerAgentDeps(
             reference_doc=context.reference_doc,
             tone=context.tone,
             recent_messages=context.recent_messages,
         )
-        
+
         result = await fallback_agent.run(user_message, deps=deps)
         return result.output
 

@@ -24,10 +24,11 @@ if logfire is not None:
     # Set ignore_no_config to suppress warnings when logfire isn't fully configured
     # This allows tests to run without requiring full logfire setup
     os.environ.setdefault("LOGFIRE_IGNORE_NO_CONFIG", "1")
-    
+
     # Try to configure logfire if token is available
     try:
         from src.config import get_settings
+
         settings = get_settings()
         if hasattr(settings, "logfire_token") and settings.logfire_token:
             logfire.configure(
@@ -53,6 +54,7 @@ def respx_mock():
 def mock_agent_service():
     """Mock MessengerAgentService for testing."""
     from src.services.agent_service import MessengerAgentService
+
     agent_service = AsyncMock(spec=MessengerAgentService)
     agent_service.respond = AsyncMock(
         return_value=AgentResponse(
@@ -75,7 +77,7 @@ def mock_agent_service():
 def mock_supabase_client():
     """Mock Supabase client for testing."""
     client = MagicMock()
-    
+
     # Mock table chain
     table_mock = MagicMock()
     select_mock = MagicMock()
@@ -83,7 +85,7 @@ def mock_supabase_client():
     insert_mock = MagicMock()
     update_mock = MagicMock()
     execute_mock = MagicMock()
-    
+
     # Chain: table().select().eq().eq().execute() (handles multiple eq calls)
     execute_mock.data = []
     eq_mock2 = MagicMock()
@@ -92,53 +94,54 @@ def mock_supabase_client():
     eq_mock.eq.return_value = eq_mock2  # Support chained eq() calls
     select_mock.eq.return_value = eq_mock
     table_mock.select.return_value = select_mock
-    
+
     # Chain: table().insert().execute()
     insert_execute_mock = MagicMock()
     insert_execute_mock.data = []
     insert_mock.execute.return_value = insert_execute_mock
     table_mock.insert.return_value = insert_mock
-    
+
     # Chain: table().update().eq().execute()
     update_execute_mock = MagicMock()
     update_execute_mock.data = []
     update_mock.eq.return_value = MagicMock()
     update_mock.eq.return_value.execute.return_value = update_execute_mock
     table_mock.update.return_value = update_mock
-    
+
     client.table.return_value = table_mock
-    
+
     return client
 
 
 @pytest.fixture
 def mock_httpx_client(monkeypatch):
     """Mock httpx.AsyncClient for testing with proper cleanup simulation."""
+
     async def mock_get(*args, **kwargs):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.text = "<html><body>Test content</body></html>"
         mock_response.raise_for_status = Mock()
         return mock_response
-    
+
     async def mock_post(*args, **kwargs):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"content": "Test response"}
         mock_response.raise_for_status = Mock()
         return mock_response
-    
+
     async def mock_close():
         """Simulate closing the HTTP client to clean up resources."""
         return None
-    
+
     mock_client = MagicMock()
     mock_client.get = AsyncMock(side_effect=mock_get)
     mock_client.post = AsyncMock(side_effect=mock_post)
     mock_client.close = AsyncMock(side_effect=mock_close)
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)  # This closes properly
-    
+
     return mock_client
 
 
@@ -155,7 +158,7 @@ def sample_bot_config():
         "facebook_verify_token": "verify-123",
         "created_at": datetime.utcnow().isoformat(),
         "updated_at": datetime.utcnow().isoformat(),
-        "is_active": True
+        "is_active": True,
     }
 
 
@@ -191,7 +194,7 @@ def sample_agent_context(sample_reference_doc):
         bot_config_id="bot-123",
         reference_doc=sample_reference_doc,
         tone="professional",
-        recent_messages=["Hello", "How can I help?"]
+        recent_messages=["Hello", "How can I help?"],
     )
 
 
@@ -202,7 +205,7 @@ def sample_agent_response():
         message="This is a test response",
         confidence=0.85,
         requires_escalation=False,
-        escalation_reason=None
+        escalation_reason=None,
     )
 
 
@@ -211,18 +214,20 @@ def test_client(mock_settings, mock_logfire):
     """FastAPI TestClient for E2E tests."""
     from fastapi.testclient import TestClient
     from src.main import app
+
     return TestClient(app)
 
 
 @pytest.fixture
 def mock_facebook_api(monkeypatch):
     """Mock Facebook Graph API responses."""
+
     async def mock_post(*args, **kwargs):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.raise_for_status = Mock()
         return mock_response
-    
+
     return mock_post
 
 
@@ -230,7 +235,7 @@ def mock_facebook_api(monkeypatch):
 def mock_settings(monkeypatch):
     """Mock application settings."""
     from src.config import Settings
-    
+
     settings = Settings(
         facebook_page_access_token="test-page-token",
         facebook_verify_token="test-verify-token",
@@ -238,13 +243,13 @@ def mock_settings(monkeypatch):
         supabase_url="https://test.supabase.co",
         supabase_service_key="test-service-key",
         pydantic_ai_gateway_api_key="paig_test_key",
-        default_model="gateway/openai:gpt-4o",
-        fallback_model="gateway/anthropic:claude-3-5-sonnet-latest",
+        default_model="gateway/anthropic:claude-3-5-sonnet-latest",
+        fallback_model="gateway/anthropic:claude-3-5-haiku-latest",
         openai_api_key="test-openai-key",
         env="local",
         logfire_token=None,
     )
-    
+
     monkeypatch.setattr("src.config.get_settings", lambda: settings)
     # Patch where get_settings is used so request handlers see the mock
     monkeypatch.setattr("src.main.get_settings", lambda: settings)
@@ -255,33 +260,35 @@ def mock_settings(monkeypatch):
 def logfire_capture():
     """
     Capture Logfire logs for testing.
-    
+
     This fixture patches Logfire to capture log calls for assertion.
     """
     if logfire is None:
         pytest.skip("logfire not available")
-    
+
     captured_logs = []
-    
+
     original_info = logfire.info
     original_warn = logfire.warn
     original_error = logfire.error
-    
+
     def capture_info(*args, **kwargs):
         captured_logs.append(("info", args, kwargs))
         return original_info(*args, **kwargs)
-    
+
     def capture_warn(*args, **kwargs):
         captured_logs.append(("warn", args, kwargs))
         return original_warn(*args, **kwargs)
-    
+
     def capture_error(*args, **kwargs):
         captured_logs.append(("error", args, kwargs))
         return original_error(*args, **kwargs)
-    
-    with patch("logfire.info", side_effect=capture_info), \
-         patch("logfire.warn", side_effect=capture_warn), \
-         patch("logfire.error", side_effect=capture_error):
+
+    with (
+        patch("logfire.info", side_effect=capture_info),
+        patch("logfire.warn", side_effect=capture_warn),
+        patch("logfire.error", side_effect=capture_error),
+    ):
         yield captured_logs
 
 
@@ -289,17 +296,17 @@ def logfire_capture():
 def mock_logfire(monkeypatch):
     """
     Mock Logfire for testing without actual logging.
-    
+
     Useful for tests that don't need to verify logging behavior.
     Auto-applied to all tests to prevent logfire.context errors.
     """
     from contextlib import contextmanager
     import sys
-    
+
     @contextmanager
     def mock_span(*args, **kwargs):
         yield {}
-    
+
     mock_logfire_module = MagicMock()
     mock_logfire_module.info = Mock()
     mock_logfire_module.warn = Mock()
@@ -310,22 +317,34 @@ def mock_logfire(monkeypatch):
     mock_logfire_module.instrument_fastapi = Mock()
     mock_logfire_module.instrument_pydantic = Mock()
     mock_logfire_module.instrument_pydantic_ai = Mock()
-    
+
     # Patch logfire in sys.modules to affect all imports (only patch attributes that exist)
-    if 'logfire' in sys.modules:
-        original_logfire = sys.modules['logfire']
-        for attr in ['info', 'warn', 'error', 'span', 'configure',
-                     'instrument_fastapi', 'instrument_pydantic', 'instrument_pydantic_ai']:
+    if "logfire" in sys.modules:
+        original_logfire = sys.modules["logfire"]
+        for attr in [
+            "info",
+            "warn",
+            "error",
+            "span",
+            "configure",
+            "instrument_fastapi",
+            "instrument_pydantic",
+            "instrument_pydantic_ai",
+        ]:
             if hasattr(original_logfire, attr):
-                monkeypatch.setattr(original_logfire, attr, getattr(mock_logfire_module, attr))
-        if hasattr(original_logfire, 'context'):
-            monkeypatch.setattr(original_logfire, 'context', mock_logfire_module.context)
-    
+                monkeypatch.setattr(
+                    original_logfire, attr, getattr(mock_logfire_module, attr)
+                )
+        if hasattr(original_logfire, "context"):
+            monkeypatch.setattr(
+                original_logfire, "context", mock_logfire_module.context
+            )
+
     # Also patch module-level imports in our code (only modules that use logfire)
     monkeypatch.setattr("src.services.scraper.logfire", mock_logfire_module)
     monkeypatch.setattr("src.services.facebook_service.logfire", mock_logfire_module)
     monkeypatch.setattr("src.db.repository.logfire", mock_logfire_module)
     monkeypatch.setattr("src.middleware.correlation_id.logfire", mock_logfire_module)
     monkeypatch.setattr("src.logging_config.logfire", mock_logfire_module)
-    
+
     return mock_logfire_module

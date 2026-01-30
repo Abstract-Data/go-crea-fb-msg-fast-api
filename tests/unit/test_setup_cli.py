@@ -7,9 +7,11 @@ import time
 from unittest.mock import patch, MagicMock
 import typer
 
+from src.models.agent_models import AgentResponse
 from src.cli.setup_cli import (
     setup,
     test as cli_test_command,
+    _run_test_repl,
     ACTION_CONTINUE,
     ACTION_EXIT,
     ACTION_TEST_BOT,
@@ -547,7 +549,9 @@ class TestSetupCLI:
             "verify-123",
         ]
         setup()
-        mock_run_test_repl.assert_called_once()
+        mock_run_test_repl.assert_called_once_with(
+            "# Doc", "Professional", "doc-123", "https://example.com"
+        )
         mock_create_bot.assert_called_once()
         assert mock_create_bot.call_args[1]["tone"] == "Friendly"
 
@@ -587,4 +591,83 @@ class TestSetupCLI:
         mock_prompt.return_value = "https://example.com"
         mock_questionary_select.return_value.ask.return_value = "Professional"
         cli_test_command()
-        mock_run_test_repl.assert_called_once_with("# Doc content", "Professional")
+        mock_run_test_repl.assert_called_once_with(
+            "# Doc content", "Professional", "doc-1", "https://example.com"
+        )
+
+
+class TestRunTestReplPersistence:
+    """Test that _run_test_repl creates test session and persists messages."""
+
+    @patch("src.cli.setup_cli.typer.prompt")
+    @patch("src.cli.setup_cli.typer.echo")
+    @patch("src.cli.setup_cli.save_test_message")
+    @patch("src.cli.setup_cli.create_test_session")
+    @patch("src.cli.setup_cli.MessengerAgentService")
+    def test_create_test_session_and_save_test_message_called(
+        self,
+        mock_agent_class,
+        mock_create_session,
+        mock_save_message,
+        mock_echo,
+        mock_prompt,
+    ):
+        """Test the bot path invokes create_test_session and save_test_message."""
+        mock_create_session.return_value = "sess-1"
+        mock_agent = MagicMock()
+
+        async def fake_respond(_ctx, msg):
+            return AgentResponse(
+                message="Hey",
+                confidence=0.9,
+                requires_escalation=False,
+                escalation_reason=None,
+            )
+
+        mock_agent.respond = fake_respond
+        mock_agent_class.return_value = mock_agent
+        mock_prompt.side_effect = ["Hi", "quit"]
+
+        _run_test_repl(
+            ref_doc_content="# Doc",
+            tone="Professional",
+            reference_doc_id="doc-123",
+            source_url="https://example.com",
+        )
+
+        mock_create_session.assert_called_once_with(
+            "doc-123", "https://example.com", "Professional"
+        )
+        mock_save_message.assert_called_once_with(
+            test_session_id="sess-1",
+            user_message="Hi",
+            response_text="Hey",
+            confidence=0.9,
+            requires_escalation=False,
+            escalation_reason=None,
+        )
+
+    @patch("src.cli.setup_cli.MessengerAgentService")
+    @patch("src.cli.setup_cli.typer.prompt")
+    @patch("src.cli.setup_cli.typer.echo")
+    @patch("src.cli.setup_cli.save_test_message")
+    @patch("src.cli.setup_cli.create_test_session")
+    def test_when_create_test_session_fails_no_save_test_message(
+        self, mock_create_session, mock_save_message, mock_echo, mock_prompt, mock_agent_class
+    ):
+        """When create_test_session fails, REPL runs but save_test_message is never called."""
+        mock_create_session.side_effect = Exception("Supabase unavailable")
+        mock_prompt.return_value = "quit"
+        mock_agent_class.return_value = MagicMock()
+
+        _run_test_repl(
+            ref_doc_content="# Doc",
+            tone="Casual",
+            reference_doc_id="doc-456",
+            source_url="https://example.org",
+        )
+
+        mock_create_session.assert_called_once_with(
+            "doc-456", "https://example.org", "Casual"
+        )
+        mock_save_message.assert_not_called()

@@ -69,7 +69,7 @@ from src.logging_config import setup_logfire
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    setup_logfire()  # Initializes Logfire with FastAPI and Pydantic instrumentation
+    setup_logfire(app)  # Initializes Logfire with FastAPI and Pydantic instrumentation
     # ... rest of startup
 ```
 

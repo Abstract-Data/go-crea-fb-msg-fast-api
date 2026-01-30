@@ -31,14 +31,39 @@ def _same_domain(base_url: str, link_url: str) -> bool:
     parsed_link = urlparse(link_url)
     if not parsed_link.netloc:
         return True
-    return parsed_link.scheme == parsed_base.scheme and parsed_link.netloc == parsed_base.netloc
+    return (
+        parsed_link.scheme == parsed_base.scheme
+        and parsed_link.netloc == parsed_base.netloc
+    )
 
 
 # Extensions we skip when crawling (binary or non-page resources)
 _NON_HTML_EXTENSIONS = frozenset(
-    (".pdf", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico",
-     ".zip", ".tar", ".gz", ".css", ".js", ".json", ".xml", ".rss",
-     ".mp3", ".mp4", ".webm", ".woff", ".woff2", ".ttf", ".eot")
+    (
+        ".pdf",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".webp",
+        ".svg",
+        ".ico",
+        ".zip",
+        ".tar",
+        ".gz",
+        ".css",
+        ".js",
+        ".json",
+        ".xml",
+        ".rss",
+        ".mp3",
+        ".mp4",
+        ".webm",
+        ".woff",
+        ".woff2",
+        ".ttf",
+        ".eot",
+    )
 )
 
 
@@ -203,7 +228,11 @@ async def scrape_website(url: str, max_pages: int = 20) -> List[str]:
                 html = await asyncio.to_thread(_fetch_with_browser_sync, current, 45.0)
                 text, new_links = _parse_page_text_and_links(html, current)
             except Exception as e:
-                logfire.warning("Browser refetch failed, using initial content", url=current, error=str(e))
+                logfire.warning(
+                    "Browser refetch failed, using initial content",
+                    url=current,
+                    error=str(e),
+                )
         if text:
             page_texts.append(text)
 

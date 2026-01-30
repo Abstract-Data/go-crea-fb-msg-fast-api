@@ -3,7 +3,7 @@ name = "facebook-messenger-scrape-bot"
 version = "0.1.0"
 description = "Production-ready FastAPI application for AI-powered Facebook Messenger bots using PydanticAI Gateway"
 readme = "README.md"
-requires-python = ">=3.12.8"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",

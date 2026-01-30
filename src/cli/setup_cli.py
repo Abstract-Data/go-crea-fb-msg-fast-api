@@ -1,11 +1,14 @@
 """Typer-based interactive setup CLI."""
 
 import os
+
 os.environ.setdefault("LOGFIRE_IGNORE_NO_CONFIG", "1")
 
 from pathlib import Path
+
 _project_root = Path(__file__).resolve().parent.parent.parent
 from dotenv import load_dotenv
+
 load_dotenv(_project_root / ".env")
 load_dotenv(_project_root / ".env.local")
 
@@ -18,7 +21,9 @@ from src.services.reference_doc import build_reference_document
 from src.db.repository import (
     create_bot_configuration,
     create_reference_document,
+    create_test_session,
     get_reference_document_by_source_url,
+    save_test_message,
 )
 from src.models.agent_models import AgentContext
 from src.services.agent_service import MessengerAgentService
@@ -72,7 +77,9 @@ def _run_async_with_cleanup(coro):
                 # Cancel all pending tasks that aren't done
                 try:
                     if not loop.is_closed():
-                        pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
+                        pending = [
+                            task for task in asyncio.all_tasks(loop) if not task.done()
+                        ]
                         for task in pending:
                             task.cancel()
                         # Wait for cancellation to complete, ignoring exceptions
@@ -120,10 +127,16 @@ def _select_tone(message: str = "Select a tone") -> str:
     return choice
 
 
-def _run_test_repl(ref_doc_content: str, tone: str) -> None:
+def _run_test_repl(
+    ref_doc_content: str,
+    tone: str,
+    reference_doc_id: str,
+    source_url: str,
+) -> None:
     """
     Run the test REPL: user types messages, agent responds. No Facebook required.
     Uses placeholder bot_config_id; agent only needs reference_doc and tone.
+    Persists exchanges to Supabase (test_sessions / test_messages) when available.
     """
     context = AgentContext(
         bot_config_id="cli-test",
@@ -132,7 +145,23 @@ def _run_test_repl(ref_doc_content: str, tone: str) -> None:
         recent_messages=[],
     )
     agent = MessengerAgentService()
-    typer.echo("\nTest the bot (type 'quit' or press Enter with empty message to exit).\n")
+    typer.echo(
+        "\nTest the bot (type 'quit' or press Enter with empty message to exit).\n"
+    )
+
+    session_id: str | None = None
+    try:
+        session_id = create_test_session(reference_doc_id, source_url, tone)
+        typer.echo(
+            f"Session ID: {session_id} — view in Supabase: test_sessions / test_messages\n"
+        )
+    except Exception:
+        session_id = None
+        typer.echo(
+            "Could not create test session (Supabase unavailable). Conversation will not be persisted.\n",
+            err=True,
+        )
+
     recent_messages: list[str] = []
 
     while True:
@@ -146,9 +175,23 @@ def _run_test_repl(ref_doc_content: str, tone: str) -> None:
             response = _run_async_with_cleanup(agent.respond(context, user_message))
             typer.echo(f"Bot: {response.message}")
             if response.requires_escalation and response.escalation_reason:
-                typer.echo(typer.style(f"  [escalation: {response.escalation_reason}]", fg=typer.colors.YELLOW))
+                typer.echo(
+                    typer.style(
+                        f"  [escalation: {response.escalation_reason}]",
+                        fg=typer.colors.YELLOW,
+                    )
+                )
             recent_messages.append(f"User: {user_message}")
             recent_messages.append(f"Bot: {response.message}")
+            if session_id is not None:
+                save_test_message(
+                    test_session_id=session_id,
+                    user_message=user_message,
+                    response_text=response.message,
+                    confidence=response.confidence,
+                    requires_escalation=response.requires_escalation,
+                    escalation_reason=response.escalation_reason,
+                )
         except Exception as e:
             typer.echo(f"Error: {e}", err=True)
     typer.echo("Exiting test.\n")
@@ -239,7 +282,7 @@ def setup():
             return
         if action == ACTION_TEST_BOT:
             tone = _select_tone("Select a tone for testing")
-            _run_test_repl(ref_doc_content, tone)
+            _run_test_repl(ref_doc_content, tone, reference_doc_id, normalized_url)
             continue
         # ACTION_CONTINUE
         break
@@ -286,15 +329,21 @@ def test():
     Test the bot using an existing reference document (no Facebook credentials).
     Paste the website URL; if a reference doc exists for that URL, you can chat with the bot.
     """
-    website_url = typer.prompt("Website URL (for which you already have a reference document)")
+    website_url = typer.prompt(
+        "Website URL (for which you already have a reference document)"
+    )
     normalized_url = _normalize_website_url(website_url)
     existing_doc = get_reference_document_by_source_url(normalized_url)
     if not existing_doc:
-        typer.echo("No reference document found for this URL. Run setup first to scrape and generate one.", err=True)
+        typer.echo(
+            "No reference document found for this URL. Run setup first to scrape and generate one.",
+            err=True,
+        )
         raise typer.Exit(1)
     ref_doc_content = existing_doc["content"]
+    reference_doc_id = existing_doc["id"]
     tone = _select_tone("Select a tone for testing")
-    _run_test_repl(ref_doc_content, tone)
+    _run_test_repl(ref_doc_content, tone, reference_doc_id, normalized_url)
 
 
 if __name__ == "__main__":

@@ -21,10 +21,10 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown."""
     # Startup
     settings = get_settings()
-    
+
     # Initialize Logfire for observability
-    setup_logfire()
-    
+    setup_logfire(app)
+
     # Initialize Sentry if DSN is provided
     if settings.sentry_dsn:
         sentry_sdk.init(
@@ -36,20 +36,20 @@ async def lifespan(app: FastAPI):
                 MCPIntegration(),
             ],
         )
-    
+
     # Initialize Supabase client
     supabase = get_supabase_client()
     app.state.supabase = supabase
-    
+
     # REMOVED: Copilot service initialization
     # PydanticAI Gateway doesn't require app-level initialization
     # Each agent service instance handles its own connection
-    
+
     print(f"Using model: {settings.default_model}")
     print(f"Environment: {settings.env}")
-    
+
     yield
-    
+
     # Shutdown
     # Cleanup if needed
 
@@ -59,7 +59,7 @@ app = FastAPI(
     title="Facebook Messenger AI Bot",
     description="AI-powered Facebook Messenger bot using PydanticAI Gateway",
     version="0.2.0",  # Version bump for PAIG migration
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Correlation ID middleware (must be first for request tracing)
@@ -86,17 +86,14 @@ def root():
     return {
         "message": "Facebook Messenger AI Bot API",
         "model": settings.default_model,
-        "version": "0.2.0"
+        "version": "0.2.0",
     }
 
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(
-        "src.main:app",
-        host="0.0.0.0",
-        port=port,
-        reload=os.getenv("ENV") == "local"
+        "src.main:app", host="0.0.0.0", port=port, reload=os.getenv("ENV") == "local"
     )

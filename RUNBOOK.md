@@ -392,6 +392,15 @@ supabase db pull
 # Via Supabase dashboard: SELECT id, bot_config_id, LENGTH(content) as content_size FROM reference_documents;
 ```
 
+### Test REPL conversation persistence
+
+Test conversations from **Test the bot** (in-flow) or **`uv run python -m src.cli.setup_cli test`** are stored in Supabase.
+
+- **Tables:** `test_sessions` (one per REPL run: `reference_doc_id`, `source_url`, `tone`) and `test_messages` (each user/bot exchange).
+- **Session ID:** When a test REPL starts, the CLI prints `Session ID: <uuid> — view in Supabase: test_sessions / test_messages`. Use that UUID to filter.
+- **View in Supabase:** Open Table Editor (or SQL) → `test_sessions` for config, `test_messages` for history. Filter `test_messages` by `test_session_id` = the echoed session ID to see the current run.
+- If Supabase is unavailable during a test run, the CLI warns and the REPL continues without persisting.
+
 ### Agent Service Debugging
 
 ```bash
