@@ -15,6 +15,7 @@ class TestMessengerAgentService:
         """Sample agent context."""
         return AgentContext(
             bot_config_id="test-bot-id",
+            reference_doc_id="test-ref-doc-id",
             reference_doc="# Test Reference\n\nThis is a test document about our services.",
             tone="professional",
             recent_messages=["Hello", "How can I help?"],
@@ -105,6 +106,7 @@ class TestMessengerAgentService:
         """Test that tenant_id is passed through correctly."""
         context = AgentContext(
             bot_config_id="test-bot-id",
+            reference_doc_id="test-ref-doc-id",
             reference_doc="Test doc",
             tone="professional",
             recent_messages=[],

@@ -7,6 +7,7 @@ class AgentContext(BaseModel):
     """Context for agent responses."""
 
     bot_config_id: str
+    reference_doc_id: str
     reference_doc: str
     tone: str
     recent_messages: list[str] = Field(default_factory=list)

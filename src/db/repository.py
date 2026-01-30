@@ -2,7 +2,7 @@
 
 import time
 from datetime import datetime
-from typing import Optional
+from typing import Any, List, Optional
 import uuid
 
 import logfire
@@ -230,6 +230,109 @@ def get_reference_document_by_source_url(source_url: str) -> Optional[dict]:
     if not result.data:
         return None
     return result.data[0]
+
+
+def _embedding_to_text(embedding: List[float]) -> str:
+    """Format embedding list as pgvector text literal '[a,b,c,...]'."""
+    return "[" + ",".join(str(x) for x in embedding) + "]"
+
+
+def create_scraped_page(
+    reference_doc_id: str,
+    url: str,
+    normalized_url: str,
+    title: str,
+    raw_content: str,
+    word_count: int,
+    scraped_at: datetime,
+) -> str:
+    """
+    Insert a single scraped page row.
+
+    Returns:
+        scraped_page id (uuid string)
+    """
+    supabase = get_supabase_client()
+    data = {
+        "reference_doc_id": reference_doc_id,
+        "url": url,
+        "normalized_url": normalized_url,
+        "title": title or "",
+        "raw_content": raw_content,
+        "word_count": word_count,
+        "scraped_at": scraped_at.isoformat() if hasattr(scraped_at, "isoformat") else scraped_at,
+    }
+    result = supabase.table("scraped_pages").insert(data).execute()
+    if not result.data:
+        raise ValueError("Failed to create scraped_page")
+    return result.data[0]["id"]
+
+
+def create_page_chunks(
+    scraped_page_id: str,
+    chunks_with_embeddings: List[tuple[str, List[float], int]],
+) -> None:
+    """
+    Batch insert page chunks with embeddings.
+
+    chunks_with_embeddings: list of (content, embedding, word_count) per chunk.
+    """
+    if not chunks_with_embeddings:
+        return
+    supabase = get_supabase_client()
+    rows: List[dict[str, Any]] = []
+    for idx, (content, embedding, word_count) in enumerate(chunks_with_embeddings):
+        rows.append({
+            "scraped_page_id": scraped_page_id,
+            "chunk_index": idx,
+            "content": content,
+            "embedding": embedding,  # Supabase accepts list for vector column
+            "word_count": word_count,
+        })
+    supabase.table("page_chunks").insert(rows).execute()
+    logfire.info(
+        "Page chunks created",
+        scraped_page_id=scraped_page_id,
+        chunk_count=len(rows),
+    )
+
+
+def search_page_chunks(
+    query_embedding: List[float],
+    reference_doc_id: str,
+    limit: int = 5,
+) -> List[dict[str, Any]]:
+    """
+    Semantic search over page chunks for a given reference document.
+
+    Returns list of dicts with id, scraped_page_id, chunk_index, content, word_count, page_url, distance.
+    """
+    supabase = get_supabase_client()
+    query_embedding_text = _embedding_to_text(query_embedding)
+    result = supabase.rpc(
+        "search_page_chunks",
+        {
+            "query_embedding_text": query_embedding_text,
+            "ref_doc_id": reference_doc_id,
+            "match_limit": limit,
+        },
+    ).execute()
+    if not result.data:
+        return []
+    return list(result.data)
+
+
+def get_scraped_pages_by_reference_doc(reference_doc_id: str) -> List[dict[str, Any]]:
+    """List all scraped pages for a reference document."""
+    supabase = get_supabase_client()
+    result = (
+        supabase.table("scraped_pages")
+        .select("*")
+        .eq("reference_doc_id", reference_doc_id)
+        .order("created_at")
+        .execute()
+    )
+    return list(result.data) if result.data else []
 
 
 def get_user_profile(sender_id: str, page_id: str) -> dict | None:

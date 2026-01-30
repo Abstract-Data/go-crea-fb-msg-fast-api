@@ -105,6 +105,7 @@ class TestAgentModels:
 
     @given(
         bot_config_id=st.text(min_size=1, max_size=100),
+        reference_doc_id=st.uuids(),
         reference_doc=st.text(min_size=10, max_size=50000),
         tone=st.sampled_from(
             ["professional", "friendly", "casual", "formal", "humorous"]
@@ -114,6 +115,7 @@ class TestAgentModels:
     def test_agent_context_properties(
         self,
         bot_config_id: str,
+        reference_doc_id,
         reference_doc: str,
         tone: str,
         recent_messages: list[str],
@@ -121,11 +123,13 @@ class TestAgentModels:
         """Property: AgentContext should maintain invariants."""
         context = AgentContext(
             bot_config_id=bot_config_id,
+            reference_doc_id=str(reference_doc_id),
             reference_doc=reference_doc,
             tone=tone,
             recent_messages=recent_messages,
         )
         assert context.bot_config_id == bot_config_id
+        assert context.reference_doc_id == str(reference_doc_id)
         assert len(context.reference_doc) > 0
         assert context.tone in [
             "professional",

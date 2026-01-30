@@ -4,12 +4,15 @@ import logging
 import re
 from pathlib import Path
 
+import logfire
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.fallback import FallbackModel
 
 from src.config import get_settings
+from src.db.repository import search_page_chunks
 from src.models.agent_models import AgentContext, AgentResponse
+from src.services.embedding_service import embed_query
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +24,7 @@ _AGENT_SYSTEM_PROMPT_PATH = _PROJECT_ROOT / "prompts" / "agent_system_instructio
 class MessengerAgentDeps(BaseModel):
     """Dependencies passed to the agent at runtime."""
 
+    reference_doc_id: str
     reference_doc: str
     tone: str
     recent_messages: list[str] = Field(default_factory=list)
@@ -129,6 +133,56 @@ class MessengerAgentService:
                 return f"Topic '{topic}' is covered in the reference document."
             return f"Topic '{topic}' is NOT covered. Consider escalating to human."
 
+        @self.agent.tool
+        async def search_pages(
+            ctx: RunContext[MessengerAgentDeps], query: str
+        ) -> str:
+            """Search scraped website pages for specific information.
+
+            Use this when you need to find detailed information that may not be
+            in the overview, such as specific policies, contact details, or
+            facts about particular topics.
+            """
+            logfire.info(
+                "Agent searching scraped pages beyond reference doc",
+                tool="search_pages",
+                query=query[:200],
+                reference_doc_id=ctx.deps.reference_doc_id,
+            )
+            settings = get_settings()
+            limit = settings.search_result_limit
+            query_embedding = await embed_query(query)
+            if not query_embedding:
+                logfire.warning(
+                    "search_pages skipped: empty query or embedding failed",
+                    query_length=len(query),
+                )
+                return "Search could not be run (empty query or embedding failed)."
+            results = search_page_chunks(
+                query_embedding=query_embedding,
+                reference_doc_id=ctx.deps.reference_doc_id,
+                limit=limit,
+            )
+            if not results:
+                logfire.info(
+                    "search_pages returned no matches",
+                    query=query[:200],
+                    reference_doc_id=ctx.deps.reference_doc_id,
+                )
+                return "No matching content found in the scraped pages."
+            logfire.info(
+                "search_pages returned results from scraped pages",
+                result_count=len(results),
+                query=query[:200],
+                reference_doc_id=ctx.deps.reference_doc_id,
+            )
+            parts = []
+            for r in results:
+                page_url = r.get("page_url", "")
+                content = r.get("content", "")[:500]
+                parts.append(f"[Source: {page_url}]\n{content}...")
+            return "\n\n---\n\n".join(parts)
+
     async def respond(
         self,
         context: AgentContext,
@@ -146,6 +200,7 @@ class MessengerAgentService:
         """
         # Build dependencies
         deps = MessengerAgentDeps(
+            reference_doc_id=context.reference_doc_id,
             reference_doc=context.reference_doc,
             tone=context.tone,
             recent_messages=context.recent_messages,
@@ -204,6 +259,7 @@ class MessengerAgentService:
         )
 
         deps = MessengerAgentDeps(
+            reference_doc_id=context.reference_doc_id,
             reference_doc=context.reference_doc,
             tone=context.tone,
             recent_messages=context.recent_messages,

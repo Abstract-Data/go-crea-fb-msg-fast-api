@@ -192,6 +192,7 @@ def sample_agent_context(sample_reference_doc):
     """Sample AgentContext for testing."""
     return AgentContext(
         bot_config_id="bot-123",
+        reference_doc_id="ref-doc-123",
         reference_doc=sample_reference_doc,
         tone="professional",
         recent_messages=["Hello", "How can I help?"],

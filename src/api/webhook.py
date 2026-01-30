@@ -121,6 +121,7 @@ async def process_message(page_id: str, sender_id: str, message_text: str):
 
         context = AgentContext(
             bot_config_id=bot_config.id,
+            reference_doc_id=bot_config.reference_doc_id,
             reference_doc=ref_doc["content"],
             tone=bot_config.tone,
             recent_messages=recent_messages,

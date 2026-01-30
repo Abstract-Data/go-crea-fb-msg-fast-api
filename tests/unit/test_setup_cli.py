@@ -4,10 +4,11 @@ import pytest
 import asyncio
 import gc
 import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock
 import typer
 
 from src.models.agent_models import AgentResponse
+from src.models.scraper_models import ScrapeResult
 from src.cli.setup_cli import (
     setup,
     test as cli_test_command,
@@ -167,8 +168,10 @@ class TestSetupCLI:
         mock_supabase = MagicMock()
         mock_get_supabase.return_value = mock_supabase
 
-        # Mock scraping
-        mock_scrape.return_value = ["chunk1", "chunk2", "chunk3"]
+        # Mock scraping (ScrapeResult with empty pages so indexing step does nothing)
+        mock_scrape.return_value = ScrapeResult(
+            pages=[], chunks=["chunk1", "chunk2", "chunk3"], content_hash="hash"
+        )
 
         # Mock reference doc building (returns markdown string, not tuple)
         mock_build_ref.return_value = "# Reference Document"
@@ -268,7 +271,7 @@ class TestSetupCLI:
         mock_get_settings.return_value = mock_settings
 
         mock_prompt.return_value = "https://example.com"
-        mock_scrape.return_value = ["chunk1"]
+        mock_scrape.return_value = ScrapeResult(pages=[], chunks=["chunk1"], content_hash="h")
         mock_build_ref.side_effect = Exception("Reference doc generation failed")
 
         with pytest.raises(typer.Exit):
@@ -315,7 +318,7 @@ class TestSetupCLI:
             "token-123",
             "verify-123",
         ]
-        mock_scrape.return_value = ["chunk1"]
+        mock_scrape.return_value = ScrapeResult(pages=[], chunks=["chunk1"], content_hash="h")
         mock_build_ref.return_value = "# Doc"
         mock_create_ref_doc.side_effect = Exception("Database error")
 
@@ -372,7 +375,7 @@ class TestSetupCLI:
             VALID_PAGE_ACCESS_TOKEN,
             VALID_VERIFY_TOKEN,
         ]
-        mock_scrape.return_value = ["chunk1"]
+        mock_scrape.return_value = ScrapeResult(pages=[], chunks=["chunk1"], content_hash="h")
         mock_build_ref.return_value = "# Doc"
         mock_create_ref_doc.return_value = "doc-123"
         mock_create_bot.return_value = MagicMock()
@@ -427,7 +430,7 @@ class TestSetupCLI:
             VALID_PAGE_ACCESS_TOKEN,
             VALID_VERIFY_TOKEN,
         ]
-        mock_scrape.return_value = ["chunk1"]
+        mock_scrape.return_value = ScrapeResult(pages=[], chunks=["chunk1"], content_hash="h")
         mock_build_ref.return_value = "# Doc"
         mock_create_ref_doc.return_value = "doc-123"
         mock_create_bot.return_value = MagicMock()
@@ -439,6 +442,7 @@ class TestSetupCLI:
         webhook_mentions = [call for call in echo_calls if "webhook" in call.lower()]
         assert len(webhook_mentions) > 0
 
+    @patch("src.cli.setup_cli.get_scraped_pages_by_reference_doc")
     @patch("src.cli.setup_cli.create_bot_configuration")
     @patch("src.cli.setup_cli.create_reference_document")
     @patch("src.cli.setup_cli.build_reference_document")
@@ -463,8 +467,10 @@ class TestSetupCLI:
         mock_build_ref,
         mock_create_ref_doc,
         mock_create_bot,
+        mock_get_scraped_pages,
     ):
         """When a reference doc already exists for the URL, skip scrape/build/store and resume at action menu then tone + Facebook."""
+        mock_get_scraped_pages.return_value = [{"id": "page1"}]  # already indexed
         mock_get_ref_doc.return_value = {
             "id": "existing-doc-456",
             "source_url": "https://example.com",
@@ -485,7 +491,7 @@ class TestSetupCLI:
         setup()
         # Lookup was called with normalized URL
         mock_get_ref_doc.assert_called_once_with("https://example.com")
-        # Scrape and build were skipped
+        # Scrape and build were skipped (ref doc and page index both exist)
         mock_scrape.assert_not_called()
         mock_build_ref.assert_not_called()
         mock_create_ref_doc.assert_not_called()
@@ -495,6 +501,69 @@ class TestSetupCLI:
         assert mock_create_bot.call_args[1]["tone"] == "Friendly"
         assert mock_create_bot.call_args[1]["page_id"] == "789012345678901"
 
+    @patch("src.cli.setup_cli.create_page_chunks")
+    @patch("src.cli.setup_cli.create_scraped_page")
+    @patch("src.cli.setup_cli.generate_embeddings", new_callable=AsyncMock)
+    @patch("src.cli.setup_cli.get_scraped_pages_by_reference_doc")
+    @patch("src.cli.setup_cli.create_bot_configuration")
+    @patch("src.cli.setup_cli.build_reference_document")
+    @patch("src.cli.setup_cli.scrape_website")
+    @patch("src.cli.setup_cli.get_reference_document_by_source_url")
+    @patch("src.config.get_settings")
+    @patch("src.db.client.get_supabase_client")
+    @patch("src.cli.setup_cli.questionary.select")
+    @patch("src.cli.setup_cli.typer.prompt")
+    @patch("src.cli.setup_cli.typer.echo")
+    def test_setup_existing_doc_no_pages_indexed_scrapes_and_indexes_only(
+        self,
+        mock_echo,
+        mock_prompt,
+        mock_questionary_select,
+        mock_get_supabase,
+        mock_get_settings,
+        mock_get_ref_doc,
+        mock_scrape,
+        mock_build_ref,
+        mock_create_bot,
+        mock_get_scraped_pages,
+        mock_generate_embeddings,
+        mock_create_scraped_page,
+        mock_create_page_chunks,
+    ):
+        """When ref doc exists but no pages indexed, scrape and index pages without modifying reference doc."""
+        mock_get_ref_doc.return_value = {
+            "id": "existing-doc-456",
+            "source_url": "https://example.com",
+            "content": "# Existing doc content",
+        }
+        mock_get_scraped_pages.return_value = []  # no pages indexed yet
+        mock_scrape.return_value = ScrapeResult(
+            pages=[
+                MagicMock(
+                    url="https://example.com",
+                    normalized_url="https://example.com",
+                    title="Page",
+                    content="Some content " * 100,
+                    word_count=100,
+                    scraped_at=MagicMock(),
+                )
+            ],
+            chunks=["chunk1"],
+            content_hash="h",
+        )
+        mock_create_scraped_page.return_value = "scraped-page-1"
+        mock_generate_embeddings.return_value = [[0.1] * 1536]  # one embedding per chunk
+        mock_questionary_select.return_value.ask.side_effect = [ACTION_EXIT]
+        mock_prompt.side_effect = ["https://example.com"]
+        setup()
+        mock_get_ref_doc.assert_called_once_with("https://example.com")
+        mock_get_scraped_pages.assert_called_once_with("existing-doc-456")
+        mock_scrape.assert_called_once_with("https://example.com")
+        mock_build_ref.assert_not_called()
+        mock_create_scraped_page.assert_called()
+        mock_create_bot.assert_not_called()
+
+    @patch("src.cli.setup_cli.get_scraped_pages_by_reference_doc")
     @patch("src.cli.setup_cli.create_bot_configuration")
     @patch("src.cli.setup_cli.get_reference_document_by_source_url")
     @patch("src.config.get_settings")
@@ -511,8 +580,10 @@ class TestSetupCLI:
         mock_get_settings,
         mock_get_ref_doc,
         mock_create_bot,
+        mock_get_scraped_pages,
     ):
         """When user selects Exit from action menu, setup exits without creating bot."""
+        mock_get_scraped_pages.return_value = [{"id": "page1"}]  # already indexed
         mock_get_ref_doc.return_value = {
             "id": "existing-doc-456",
             "source_url": "https://example.com",
@@ -555,7 +626,7 @@ class TestSetupCLI:
         mock_settings.copilot_cli_host = "http://localhost:5909"
         mock_settings.copilot_enabled = True
         mock_get_settings.return_value = mock_settings
-        mock_scrape.return_value = ["chunk1"]
+        mock_scrape.return_value = ScrapeResult(pages=[], chunks=["chunk1"], content_hash="h")
         mock_build_ref.return_value = "# Doc"
         mock_create_ref_doc.return_value = "doc-123"
         mock_questionary_select.return_value.ask.side_effect = [
@@ -610,7 +681,7 @@ class TestSetupCLI:
             mock_settings.copilot_cli_host = "http://localhost:5909"
             mock_settings.copilot_enabled = True
             mock_get_settings.return_value = mock_settings
-            mock_scrape.return_value = ["chunk1"]
+            mock_scrape.return_value = ScrapeResult(pages=[], chunks=["chunk1"], content_hash="h")
             mock_build_ref.return_value = "# Doc"
             mock_create_ref_doc.return_value = "doc-123"
             mock_create_bot.return_value = MagicMock()
@@ -670,7 +741,7 @@ class TestSetupCLI:
         mock_settings.copilot_cli_host = "http://localhost:5909"
         mock_settings.copilot_enabled = True
         mock_get_settings.return_value = mock_settings
-        mock_scrape.return_value = ["chunk1"]
+        mock_scrape.return_value = ScrapeResult(pages=[], chunks=["chunk1"], content_hash="h")
         mock_build_ref.return_value = "# Doc"
         mock_create_ref_doc.return_value = "doc-123"
         mock_create_bot.return_value = MagicMock()

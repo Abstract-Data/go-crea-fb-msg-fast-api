@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import respx as respx_lib
 
-from src.services.scraper import scrape_website
+from src.models.scraper_models import ScrapeResult
+from src.services.scraper import chunk_text, scrape_website
 
 
 @pytest.fixture(autouse=True)
@@ -47,11 +48,17 @@ class TestScrapeWebsite:
             return_value=httpx.Response(200, text=html_content)
         )
 
-        chunks = await scrape_website("https://example.com")
+        result = await scrape_website("https://example.com")
 
-        assert isinstance(chunks, list)
-        assert len(chunks) > 0
-        assert all(isinstance(chunk, str) for chunk in chunks)
+        assert isinstance(result, ScrapeResult)
+        assert len(result.chunks) > 0
+        assert all(isinstance(chunk, str) for chunk in result.chunks)
+        assert len(result.pages) == 1
+        assert result.pages[0].url == "https://example.com"
+        # Normalizer keeps trailing slash for root path
+        assert result.pages[0].normalized_url in ("https://example.com", "https://example.com/")
+        assert result.pages[0].title == "Test Page"
+        assert result.content_hash
 
     @pytest.mark.asyncio
     async def test_scrape_website_invalid_url(self, respx_mock):
@@ -93,7 +100,8 @@ class TestScrapeWebsite:
             return_value=httpx.Response(200, text=html_content)
         )
 
-        chunks = await scrape_website("https://example.com")
+        result = await scrape_website("https://example.com")
+        chunks = result.chunks
 
         # Script and style content should not appear
         combined_text = " ".join(chunks)
@@ -119,7 +127,8 @@ class TestScrapeWebsite:
             return_value=httpx.Response(200, text=html_content)
         )
 
-        chunks = await scrape_website("https://example.com")
+        result = await scrape_website("https://example.com")
+        chunks = result.chunks
 
         combined_text = " ".join(chunks)
         assert "Navigation links" not in combined_text
@@ -146,7 +155,8 @@ class TestScrapeWebsite:
             return_value=httpx.Response(200, text=html_content)
         )
 
-        chunks = await scrape_website("https://example.com")
+        result = await scrape_website("https://example.com")
+        chunks = result.chunks
 
         # Check that multiple spaces are normalized
         combined_text = " ".join(chunks)
@@ -166,9 +176,11 @@ class TestScrapeWebsite:
                 return_value=httpx.Response(200, text=html_content)
             )
 
-            chunks = await scrape_website("https://example.com")
+            result = await scrape_website("https://example.com")
+            chunks = result.chunks
 
             # Invariants
+            assert isinstance(result, ScrapeResult)
             assert isinstance(chunks, list)
             assert all(isinstance(chunk, str) for chunk in chunks)
             assert all(len(chunk) > 0 for chunk in chunks)  # No empty chunks
@@ -189,7 +201,8 @@ class TestScrapeWebsite:
             return_value=httpx.Response(200, text=html_content)
         )
 
-        chunks = await scrape_website("https://example.com")
+        result = await scrape_website("https://example.com")
+        chunks = result.chunks
 
         # Check chunk sizes (target is 650 words, allow some flexibility)
         for chunk in chunks[:-1]:  # Last chunk may be smaller
@@ -208,9 +221,11 @@ class TestScrapeWebsite:
             return_value=httpx.Response(200, text=html_content)
         )
 
-        chunks = await scrape_website("https://example.com")
+        result = await scrape_website("https://example.com")
+        chunks = result.chunks
 
-        # Should return empty list or list with empty string
+        # Should return ScrapeResult with empty chunks when no content
+        assert isinstance(result, ScrapeResult)
         assert isinstance(chunks, list)
         # If there's no content, chunks might be empty or contain empty strings
         if chunks:
@@ -228,7 +243,8 @@ class TestScrapeWebsite:
             )
         )
 
-        chunks = await scrape_website("https://example.com/final")
+        result = await scrape_website("https://example.com/final")
+        chunks = result.chunks
 
         # Should get content from final URL
         combined_text = " ".join(chunks)
@@ -252,10 +268,38 @@ class TestScrapeWebsite:
                 return_value=httpx.Response(200, text=html_content)
             )
 
-            chunks = await scrape_website("https://example.com")
+            result = await scrape_website("https://example.com")
+            chunks = result.chunks
 
-            # Should always return list of strings
+            # Should always return ScrapeResult with list of strings
+            assert isinstance(result, ScrapeResult)
             assert isinstance(chunks, list)
             assert all(isinstance(chunk, str) for chunk in chunks)
 
             respx_lib.reset()
+
+
+class TestChunkText:
+    """Test chunk_text() helper."""
+
+    def test_chunk_text_empty_returns_empty(self):
+        """Empty or whitespace text returns empty list."""
+        assert chunk_text("") == []
+        assert chunk_text("   ") == []
+
+    def test_chunk_text_single_chunk(self):
+        """Text under target words returns one chunk."""
+        words = ["word"] * 100
+        result = chunk_text(" ".join(words), target_words=650)
+        assert len(result) == 1
+        assert result[0][1] == 100
+
+    def test_chunk_text_multiple_chunks(self):
+        """Text over target words is split into multiple chunks."""
+        words = ["word"] * 1400
+        result = chunk_text(" ".join(words), target_words=650)
+        assert len(result) >= 2
+        total_words = sum(r[1] for r in result)
+        assert total_words == 1400
+        for _chunk_str, wc in result[:-1]:
+            assert wc >= 650
