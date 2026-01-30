@@ -21,12 +21,14 @@ class TestSettings:
             facebook_page_access_token="test-token",
             facebook_verify_token="verify-token",
             supabase_url="https://test.supabase.co",
-            supabase_service_key="service-key"
+            supabase_service_key="service-key",
+            pydantic_ai_gateway_api_key="paig_test_key"
         )
         assert settings.facebook_page_access_token == "test-token"
         assert settings.facebook_verify_token == "verify-token"
         assert settings.supabase_url == "https://test.supabase.co"
         assert settings.supabase_service_key == "service-key"
+        assert settings.pydantic_ai_gateway_api_key == "paig_test_key"
     
     def test_settings_default_values(self):
         """Test that default values are set correctly."""
@@ -34,23 +36,24 @@ class TestSettings:
             facebook_page_access_token="test-token",
             facebook_verify_token="verify-token",
             supabase_url="https://test.supabase.co",
-            supabase_service_key="service-key"
+            supabase_service_key="service-key",
+            pydantic_ai_gateway_api_key="paig_test_key"
         )
-        assert settings.copilot_cli_host == "http://localhost:5909"
-        assert settings.copilot_enabled is True
+        assert settings.default_model == "gateway/openai:gpt-4o"
+        assert settings.fallback_model == "gateway/anthropic:claude-3-5-sonnet-latest"
         assert settings.openai_api_key == ""
         assert settings.env == "local"
         assert settings.facebook_app_secret is None
     
     @given(
-        copilot_host=st.text(min_size=1, max_size=200),
-        copilot_enabled=st.booleans(),
+        default_model=st.text(min_size=1, max_size=200),
+        fallback_model=st.text(min_size=1, max_size=200),
         env=st.sampled_from(["local", "railway", "prod"])
     )
     def test_settings_optional_fields_properties(
         self,
-        copilot_host: str,
-        copilot_enabled: bool,
+        default_model: str,
+        fallback_model: str,
         env: str
     ):
         """Property: Settings should accept valid optional field values."""
@@ -59,12 +62,13 @@ class TestSettings:
             facebook_verify_token="verify-token",
             supabase_url="https://test.supabase.co",
             supabase_service_key="service-key",
-            copilot_cli_host=copilot_host,
-            copilot_enabled=copilot_enabled,
+            pydantic_ai_gateway_api_key="paig_test_key",
+            default_model=default_model,
+            fallback_model=fallback_model,
             env=env
         )
-        assert settings.copilot_cli_host == copilot_host
-        assert settings.copilot_enabled == copilot_enabled
+        assert settings.default_model == default_model
+        assert settings.fallback_model == fallback_model
         assert settings.env == env
     
     def test_settings_env_validation(self):
@@ -76,6 +80,7 @@ class TestSettings:
                 facebook_verify_token="verify-token",
                 supabase_url="https://test.supabase.co",
                 supabase_service_key="service-key",
+                pydantic_ai_gateway_api_key="paig_test_key",
                 env=env
             )
             assert settings.env == env
@@ -87,6 +92,7 @@ class TestSettings:
                 facebook_verify_token="verify-token",
                 supabase_url="https://test.supabase.co",
                 supabase_service_key="service-key",
+                pydantic_ai_gateway_api_key="paig_test_key",
                 env="invalid"
             )
 
@@ -98,7 +104,8 @@ class TestGetSettings:
         "FACEBOOK_PAGE_ACCESS_TOKEN": "test-token",
         "FACEBOOK_VERIFY_TOKEN": "test-verify",
         "SUPABASE_URL": "https://test.supabase.co",
-        "SUPABASE_SERVICE_KEY": "test-key"
+        "SUPABASE_SERVICE_KEY": "test-key",
+        "PYDANTIC_AI_GATEWAY_API_KEY": "paig_test_key"
     })
     def test_get_settings_caching(self):
         """Test that get_settings() returns cached instance."""
@@ -115,7 +122,8 @@ class TestGetSettings:
         "FACEBOOK_PAGE_ACCESS_TOKEN": "env-token",
         "FACEBOOK_VERIFY_TOKEN": "env-verify",
         "SUPABASE_URL": "https://env.supabase.co",
-        "SUPABASE_SERVICE_KEY": "env-service-key"
+        "SUPABASE_SERVICE_KEY": "env-service-key",
+        "PYDANTIC_AI_GATEWAY_API_KEY": "paig_env_key"
     })
     def test_get_settings_from_env(self):
         """Test that get_settings() loads from environment variables."""
@@ -135,7 +143,8 @@ class TestGetSettings:
             "facebook_page_access_token": "lowercase-token",
             "FACEBOOK_VERIFY_TOKEN": "uppercase-verify",
             "Supabase_Url": "mixed-case-url",
-            "SUPABASE_SERVICE_KEY": "service-key"
+            "SUPABASE_SERVICE_KEY": "service-key",
+            "PYDANTIC_AI_GATEWAY_API_KEY": "paig_test_key"
         }):
             get_settings.cache_clear()
             settings = get_settings()

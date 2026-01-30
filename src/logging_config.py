@@ -1,12 +1,9 @@
 """Centralized logging configuration with Pydantic Logfire integration."""
 
 import logging
-import os
 from typing import Any
 
 import logfire
-from logfire.integrations.fastapi import configure_fastapi
-from logfire.integrations.pydantic import configure_pydantic
 
 from src.config import get_settings
 
@@ -37,8 +34,15 @@ def setup_logfire() -> None:
     logfire.configure(**logfire_config)
     
     # Instrument FastAPI and Pydantic
-    configure_fastapi()
-    configure_pydantic()
+    logfire.instrument_fastapi()
+    logfire.instrument_pydantic()
+    
+    # Instrument PydanticAI for AI observability (pairs with PAIG)
+    try:
+        logfire.instrument_pydantic_ai()
+    except AttributeError:
+        # Fallback if instrument_pydantic_ai is not available
+        pass
     
     # Configure Python logging based on environment
     log_level = getattr(settings, "log_level", "INFO").upper()

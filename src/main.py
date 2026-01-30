@@ -14,7 +14,6 @@ from src.config import get_settings
 from src.db.client import get_supabase_client
 from src.logging_config import setup_logfire
 from src.middleware.correlation_id import CorrelationIDMiddleware
-from src.services.copilot_service import CopilotService
 
 
 @asynccontextmanager
@@ -42,17 +41,12 @@ async def lifespan(app: FastAPI):
     supabase = get_supabase_client()
     app.state.supabase = supabase
     
-    # Check Copilot availability
-    copilot = CopilotService(
-        base_url=settings.copilot_cli_host,
-        enabled=settings.copilot_enabled
-    )
-    app.state.copilot = copilot
+    # REMOVED: Copilot service initialization
+    # PydanticAI Gateway doesn't require app-level initialization
+    # Each agent service instance handles its own connection
     
-    if settings.copilot_enabled:
-        is_available = await copilot.is_available()
-        if not is_available:
-            print("Warning: Copilot SDK not available, will use OpenAI fallback")
+    print(f"Using model: {settings.default_model}")
+    print(f"Environment: {settings.env}")
     
     yield
     
@@ -63,8 +57,8 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title="Facebook Messenger AI Bot",
-    description="AI-powered Facebook Messenger bot using Copilot SDK and PydanticAI",
-    version="0.1.0",
+    description="AI-powered Facebook Messenger bot using PydanticAI Gateway",
+    version="0.2.0",  # Version bump for PAIG migration
     lifespan=lifespan
 )
 
@@ -88,7 +82,12 @@ app.include_router(webhook.router, prefix="/webhook", tags=["webhook"])
 @app.get("/")
 def root():
     """Root endpoint."""
-    return {"message": "Facebook Messenger AI Bot API"}
+    settings = get_settings()
+    return {
+        "message": "Facebook Messenger AI Bot API",
+        "model": settings.default_model,
+        "version": "0.2.0"
+    }
 
 
 if __name__ == "__main__":

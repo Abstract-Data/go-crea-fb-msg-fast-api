@@ -4,36 +4,50 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from datetime import datetime
 from typing import Any
-from fastapi.testclient import TestClient
-import respx
-import logfire
 
-from src.services.copilot_service import CopilotService
+try:
+    import respx
+except ImportError:
+    respx = None
+
+try:
+    import logfire
+except ImportError:
+    logfire = None
+
 from src.models.agent_models import AgentContext, AgentResponse
 from src.models.config_models import BotConfiguration
-from src.main import app
 
 
 @pytest.fixture
 def respx_mock():
     """Respx mock fixture for HTTP mocking."""
+    if respx is None:
+        pytest.skip("respx not available")
     with respx.mock:
         yield respx
 
 
 @pytest.fixture
-def mock_copilot_service():
-    """Mock CopilotService for testing."""
-    copilot = AsyncMock(spec=CopilotService)
-    copilot.base_url = "http://localhost:5909"
-    copilot.enabled = True
-    copilot.is_available = AsyncMock(return_value=True)
-    copilot.chat = AsyncMock(return_value="Test response from Copilot")
-    copilot.synthesize_reference = AsyncMock(
-        return_value="# Test Reference Document\n\nThis is a test reference document."
+def mock_agent_service():
+    """Mock MessengerAgentService for testing."""
+    from src.services.agent_service import MessengerAgentService
+    agent_service = AsyncMock(spec=MessengerAgentService)
+    agent_service.respond = AsyncMock(
+        return_value=AgentResponse(
+            message="Test response from agent",
+            confidence=0.85,
+            requires_escalation=False,
+        )
     )
-    copilot._fallback_to_openai = AsyncMock(return_value="Fallback response")
-    return copilot
+    agent_service.respond_with_fallback = AsyncMock(
+        return_value=AgentResponse(
+            message="Fallback response",
+            confidence=0.8,
+            requires_escalation=False,
+        )
+    )
+    return agent_service
 
 
 @pytest.fixture
@@ -171,6 +185,8 @@ def sample_agent_response():
 @pytest.fixture
 def test_client():
     """FastAPI TestClient for E2E tests."""
+    from fastapi.testclient import TestClient
+    from src.main import app
     return TestClient(app)
 
 
@@ -197,14 +213,12 @@ def mock_settings(monkeypatch):
         facebook_app_secret="test-app-secret",
         supabase_url="https://test.supabase.co",
         supabase_service_key="test-service-key",
-        copilot_cli_host="http://localhost:5909",
-        copilot_enabled=True,
+        pydantic_ai_gateway_api_key="paig_test_key",
+        default_model="gateway/openai:gpt-4o",
+        fallback_model="gateway/anthropic:claude-3-5-sonnet-latest",
         openai_api_key="test-openai-key",
         env="local",
         logfire_token=None,
-        log_level="INFO",
-        logfire_enable_pii_masking=True,
-        logfire_enable_request_logging=True,
     )
     
     monkeypatch.setattr("src.config.get_settings", lambda: settings)
@@ -218,6 +232,9 @@ def logfire_capture():
     
     This fixture patches Logfire to capture log calls for assertion.
     """
+    if logfire is None:
+        pytest.skip("logfire not available")
+    
     captured_logs = []
     
     original_info = logfire.info
@@ -257,7 +274,6 @@ def mock_logfire(monkeypatch):
     mock_logfire_module.context.__enter__ = Mock(return_value={})
     mock_logfire_module.context.__exit__ = Mock(return_value=None)
     
-    monkeypatch.setattr("src.services.copilot_service.logfire", mock_logfire_module)
     monkeypatch.setattr("src.services.agent_service.logfire", mock_logfire_module)
     monkeypatch.setattr("src.services.scraper.logfire", mock_logfire_module)
     monkeypatch.setattr("src.services.facebook_service.logfire", mock_logfire_module)

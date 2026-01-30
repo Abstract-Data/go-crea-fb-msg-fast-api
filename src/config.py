@@ -40,20 +40,24 @@ class Settings(BaseSettings):
         description="Supabase service role key"
     )
     
-    # Copilot SDK Configuration
-    copilot_cli_host: str = Field(
-        default="http://localhost:5909",
-        description="GitHub Copilot CLI host URL"
+    # PydanticAI Gateway Configuration
+    pydantic_ai_gateway_api_key: str = Field(
+        ...,
+        description="PydanticAI Gateway API key (paig_xxx)"
     )
-    copilot_enabled: bool = Field(
-        default=True,
-        description="Enable Copilot SDK (False to use OpenAI fallback)"
+    default_model: str = Field(
+        default="gateway/openai:gpt-4o",
+        description="Default LLM model to use via PAIG"
+    )
+    fallback_model: str = Field(
+        default="gateway/anthropic:claude-3-5-sonnet-latest",
+        description="Fallback model if primary fails"
     )
     
-    # OpenAI Configuration (Fallback)
+    # OpenAI Configuration (kept for direct fallback if needed)
     openai_api_key: str = Field(
         default="",
-        description="OpenAI API key (used as fallback)"
+        description="OpenAI API key (legacy fallback)"
     )
     
     # Environment
@@ -72,22 +76,10 @@ class Settings(BaseSettings):
         description="Sentry traces sample rate (0.0 to 1.0)"
     )
     
-    # Logfire Configuration
+    # Logfire Configuration (NEW - pairs with PAIG)
     logfire_token: str | None = Field(
         default=None,
-        description="Logfire authentication token (optional, for cloud logging)"
-    )
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
-        default="INFO",
-        description="Logging level"
-    )
-    logfire_enable_pii_masking: bool = Field(
-        default=True,
-        description="Enable PII masking in logs"
-    )
-    logfire_enable_request_logging: bool = Field(
-        default=True,
-        description="Enable HTTP request/response logging"
+        description="Pydantic Logfire token for AI observability"
     )
 
 
